@@ -1,6 +1,6 @@
 # Script to create a raster stack for sampling associated with ensemble modeling
 # Jenny Hansen
-# 23 September
+# 25 September 2025
 
 # working in TidligVarsling project
 
@@ -32,6 +32,10 @@ names(enebolig_density) <- "enebolig_density"
 # from script 08:
 avfall <- rast("raster/distance_to_avfall.tif")
 
+# from script 09b:
+edge_density <- rast("raster/forest_edge_density.tif")
+
+
 # from Andrew (can be used if desired):
 ndvi_sd <- rast("raster/NDVIstdev.tif")
 ndvi_max <- rast("raster/NDVImax.tif")
@@ -43,15 +47,19 @@ prct_buildings <- rast("raster/percentage_buildings.tif")
 prct_forest <- rast("raster/percentage_forest.tif")
 prct_ag <- rast("raster/percentage_agriculture.tif")
 
-
 # Prepare for stacking ----------------------------------------------------
+
+# fix extent issue
+ndvi_sd      <- resample(ndvi_sd, rast_stack)
+ndvi_max     <- resample(ndvi_max, rast_stack)
+ndwi_median  <- resample(ndwi_median, rast_stack)
 
 # fix CRS issue
 epsg25833 <- "EPSG:25833"
 
 # apply to all rasters
 rasters <- list(rast_stack, ndvi_summer, forest_nb, open_nb, imperv_nb,
-                coldest_temp, enebolig_density, avfall,
+                coldest_temp, enebolig_density, avfall, edge_density,
                 ndvi_sd, ndvi_max, ndwi_median,
                 prct_industrial, prct_roads, prct_water,
                 prct_buildings, prct_forest, prct_ag)
@@ -62,35 +70,47 @@ rasters <- lapply(rasters, \(r) { crs(r) <- epsg25833; r })
 crs(prct_industrial) <- "EPSG:25833"
 
 # double check!
-for (nm in names(rasters_named)) {
-  crs(rasters_named[[nm]]) <- "EPSG:25833"
+for (nm in names(rasters)) {
+  crs(rasters[[nm]]) <- "EPSG:25833"
 }
 
-all_rasters <- do.call(c, rasters_named)
+all_rasters <- do.call(c, rasters)
 
-# fix extent issue
-ndvi_sd      <- resample(ndvi_sd, rast_stack)
-ndvi_max     <- resample(ndvi_max, rast_stack)
-ndwi_median  <- resample(ndwi_median, rast_stack)
+# additional NA handling
 
-# Combine into a stack ----------------------------------------------------
+template <- rast_stack[[1]]   # first layer, 250m resolution
+landmask <- !is.na(template)
 
-all_rasters <- c(
-  rast_stack[[1:nlyr(rast_stack)]],   
-  ndvi_summer,
-  forest_nb, open_nb, imperv_nb,
-  coldest_temp,
-  enebolig_density,
-  avfall,
-  ndvi_sd, ndvi_max, ndwi_median,
-  prct_industrial, prct_roads, prct_water, prct_buildings,
-  prct_forest, prct_ag
-)
+density_layers   <- c("edge_density", "enebolig_density")
+distance_layers  <- c("distance_to_public_road", "distance_to_private_road",
+                      "distance_to_railway", "distance_to_housing",
+                      "distance_to_industrial_area", "distance_to_garden_center",
+                      "distance_to_lumberyard", "distance_to_avfall")
+continuous_layers <- setdiff(names(all_rasters), c(density_layers, distance_layers))
 
-# quick check
-all_rasters
-nlyr(all_rasters)
-names(all_rasters)
+# clean/alignment function
+clean_layer <- function(r, name, template, landmask) {
+  r <- resample(r, template, method = "bilinear")
+  crs(r) <- crs(template)
+  r <- mask(r, landmask)
+  
+  if (name %in% density_layers) {
+    r[is.na(r)] <- 0
+  } else if (name %in% distance_layers) {
+    r <- focal(r, w = 3, fun = mean, na.policy = "only", na.rm = TRUE)
+  }
+  
+  names(r) <- name  
+  return(r)
+}
+
+
+all_cleaned <- lapply(names(all_rasters), function(nm) {
+  clean_layer(all_rasters[[nm]], nm, template, landmask)
+})
+all_rasters <- rast(all_cleaned)
+
 
 # export stack
-writeRaster(all_rasters, "raster/complete_prediction_stack.tif")
+writeRaster(all_rasters, "raster/complete_prediction_stack.tif",
+            overwrite = TRUE)

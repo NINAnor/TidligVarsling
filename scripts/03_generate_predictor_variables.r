@@ -13,6 +13,7 @@ library(terra)
 library(rgrass)
 library(osmdata)
 library(googleway)
+library(dbscan)
 
 # connect to GRASS mapset
 NinaR::grassConnect()
@@ -22,7 +23,6 @@ set_key(Sys.getenv("GOOGLE_API_KEY"))
 
 # Setup GRASS environment -------------------------------------------------
 
-# Set region to sa_grid_100m (this also take quite a while)
 execGRASS("g.region", raster = "tv_sa_250_grid", flags = "p")
 execGRASS("g.remove", type = "raster", name = "MASK", flags = "f")
 execGRASS("r.mask", vector = "norway_limits_detailed@p_sam_tools")
@@ -131,35 +131,8 @@ osm_data <- osmdata_sf(query)
 # and polygons; select only unique points
 hs_pts <- osm_data$osm_points
 
-final_garden_centers <- hs_pts %>% 
-  st_transform(25833)
 
-garden_centers_vect <- final_garden_centers %>% 
-  st_cast("POINT") %>% 
-  vect()
-write_VECT(garden_centers_vect, "garden_centers")
-
-# rasterize the vector
-execGRASS("g.region", vector = "garden_centers")
-
-execGRASS("v.to.rast", input = "garden_centers",
-          output = "garden_centers_rast",
-          use = "cat", type = "point", flags = c("overwrite"))
-
-# compute distance 
-execGRASS("r.grow.distance",
-          input    = "garden_centers_rast",
-          distance = "garden_centers_rast_zoi_nearest_euclidean",
-          metric   = "euclidean",
-          flags    = c("overwrite","quiet"))
-gc_dist <- read_RAST("garden_centers_rast_zoi_nearest_euclidean")
-
-# add to raster stack
-rast_stack <- c(rast_stack, gc_dist)
-
-
-# Distance to lumberyards -------------------------------------------------
-
+# check with Google Places API
 # function to loop over kommuner
 get_places <- function(lat, lng, kommune, api_key) {
   res <- google_places(
@@ -184,7 +157,105 @@ get_places <- function(lat, lng, kommune, api_key) {
   df
 }
 
+search_terms <- c("Garden center", "Garden centre")
+results_list <- list()
+counter <- 1
+api_key <- Sys.getenv("GOOGLE_API_KEY")
 
+for (i in seq_len(nrow(ostlandet_centers))) {
+  for (term in search_terms) {
+    
+    term_human <- term
+    term_api <- URLencode(enc2utf8(term), reserved = TRUE)
+    
+    cat("Searching:", term_human, "in", ostlandet_centers$kommune[i], "\n")
+    
+    res <- google_places(
+      location = c(ostlandet_centers$lat[i], ostlandet_centers$lng[i]),
+      radius   = 50000,
+      keyword  = term_api,
+      key      = api_key
+    )
+    
+    if (length(res$results) > 0) {
+      df <- data.frame(
+        kommune      = ostlandet_centers$kommune[i],
+        search_term  = term_human,
+        search_term_encoded = term_api,
+        name         = res$results$name,
+        address      = res$results$vicinity,
+        lat          = res$results$geometry$location$lat,
+        lng          = res$results$geometry$location$lng,
+        place_id     = res$results$place_id,
+        stringsAsFactors = FALSE
+      )
+      results_list[[counter]] <- df
+      counter <- counter + 1
+    }
+    
+    Sys.sleep(1)
+  }
+}
+
+places_df_all <- do.call(rbind, results_list)
+
+places_df_unique <- places_df_all[!duplicated(places_df_all$place_id), ] %>% 
+  group_by(address) %>%
+  slice_max(order_by = place_id, n = 1, with_ties = FALSE) %>%
+  ungroup() # n = 249
+
+places_sf <- st_as_sf(places_df_unique, coords = c("lng", "lat"), crs = 4326)
+places_sf <- places_sf %>% mutate(source = "google") %>% select(source)
+
+# add to OSM data
+hs_pts <- hs_pts %>% mutate(source = "osm") %>% select(source)
+
+final_garden_centers <- rbind(hs_pts, places_sf) %>% 
+  st_transform(25833)
+
+# remove duplicates
+coords <- st_coordinates(final_garden_centers)
+
+# cluster within 100 m
+cl <- dbscan(coords, eps = 250, minPts = 1)
+
+final_garden_centers$cluster <- cl$cluster
+
+# keep first in each cluster
+final_garden_centers_nodup <- final_garden_centers %>%
+  group_by(cluster) %>%
+  slice(1) %>%
+  ungroup() %>%
+  select(-cluster)
+
+# make vect
+garden_centers_vect <- final_garden_centers_nodup %>% 
+  st_cast("POINT") %>% 
+  vect()
+
+write_VECT(garden_centers_vect, "garden_centers",
+           flags = "overwrite")
+
+# rasterize the vector
+execGRASS("v.to.rast", input = "garden_centers",
+          output = "garden_centers_rast",
+          use = "cat", type = "point", flags = c("overwrite"))
+
+# compute distance 
+execGRASS("r.grow.distance",
+          input    = "garden_centers_rast",
+          distance = "garden_centers_rast_zoi_nearest_euclidean",
+          metric   = "euclidean",
+          flags    = c("overwrite","quiet"))
+gc_dist <- read_RAST("garden_centers_rast_zoi_nearest_euclidean")
+
+# add to raster stack
+rast_stack <- c(rast_stack, gc_dist)
+
+
+# Distance to lumberyards -------------------------------------------------
+
+# use Google Places API
 search_terms <- c("lumber", "trelast", "byggevarer", "byggvarehus", "sagbruk")
 results_list <- list()
 counter <- 1

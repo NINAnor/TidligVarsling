@@ -87,7 +87,7 @@ execGRASS("r.neighbors",
           output = "forest_cover_3x3",
           method = "average",
           size = 3,
-          flags = "overwrite")
+          flags = c("overwrite", "c")) 
 
 # remove 'focal cell' from calculation
 execGRASS("r.mapcalc",
@@ -105,7 +105,7 @@ execGRASS("r.neighbors",
           output = "open_cover_3x3",
           method = "average",
           size = 3,
-          flags = "overwrite")
+          flags = c("overwrite", "c"))
 
 execGRASS("r.mapcalc",
           expression = "open_cover_8nb = ((open_cover_3x3 * 9) - open_cover_tv_study) / 8.0",
@@ -121,7 +121,7 @@ execGRASS("r.neighbors",
           output = "impervious_cover_3x3",
           method = "average",
           size = 3,
-          flags = "overwrite")
+          flags = c("overwrite", "c"))
 
 # remove focal cell (8-neighbors only)
 execGRASS("r.mapcalc",

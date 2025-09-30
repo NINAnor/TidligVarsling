@@ -66,9 +66,10 @@ winter_min_stack <- terra::rast(winter_min_list)
 winter_min_avg   <- terra::app(winter_min_stack, mean, na.rm = TRUE)
 plot(winter_min_avg)
 
-winter_min <- project(winter_min_avg, template_rast)
+winter_min <- project(winter_min_avg, template_rast, method = "bilinear")
 
-write_RAST(winter_min, "coldest_winter_temp_tv_study")
+write_RAST(winter_min, "coldest_winter_temp_tv_study",
+           flags = "overwrite")
 
 
 # Read in with GRASS ------------------------------------------------------
@@ -81,5 +82,6 @@ plot(winter_min)
 names(winter_min) <- "coldest_winter_temperature"
 
 # write to raster folder
-writeRaster(winter_min, "raster/coldest_winter_temp.tif")
+writeRaster(winter_min, "raster/coldest_winter_temp.tif",
+            overwrite = TRUE)
 
