@@ -92,7 +92,7 @@ insect_pa <- st_sample(aoi_background, size = 225)
 insect_pa <- st_as_sf(insect_pa)
 
 # plants bg pts
-plants_pa <- st_sample(aoi_background, size = 225)
+plants_pa <- st_sample(aoi_background, size = 132)
 plants_pa <- st_as_sf(plants_pa)
 
 
@@ -163,7 +163,10 @@ sum(is.na(insect_vars)) # 0
 plant_vars <- plant_pred %>%
   select(where(is.numeric)) %>%
   select(-species_richness)
-sum(is.na(plant_vars)) # 1
+sum(is.na(plant_vars)) # 0
+
+# NB: after filtering the plant data & drawing only 132 pseudoabsences, there
+# are no NAs in the data; skipping the replacement below
 
 
 # Replace NA sample -------------------------------------------------------
@@ -224,5 +227,5 @@ insect_sf <- cbind(insect_full %>% select(species_richness),
 plant_sf <- cbind(plant_full %>% select(species_richness),
                   plant_vars)
 
-write_sf(insect_sf, "vector/insect_model_sf.geojson")
-write_sf(plant_sf, "vector/plant_model_sf.geojson")
+st_write(insect_sf, "vector/insect_model_sf.geojson")
+st_write(plant_sf, "vector/plant_model_sf.geojson")

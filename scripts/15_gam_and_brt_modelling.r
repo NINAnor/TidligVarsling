@@ -21,25 +21,27 @@ library(tibble)
 # Import data -------------------------------------------------------------
 
 # variables were selected in script 14
+# NB: these changed after filtering plants and re-doing the joint RF
 keep_vars <- c("species_richness",
-               "neighbor_prct_impervious", "enebolig_density", 
-               "coldest_winter_temperature", "distance_to_private_road",
-               "distance_to_public_road", "ndvi_stdDev", "ndvi_summer",
-               "percentage_roads", "percentage_agriculture",
-               "distance_to_avfall", "distance_to_garden_center")
+               "neighbor_prct_impervious", "percentage_buildings", 
+               "distance_to_lumberyard", "ndvi_stdDev",
+               "distance_to_industrial_area", "distance_to_private_road", 
+               "ndwi_median", "ndvi_summer", "neighbor_prct_open",
+               "percentage_agriculture", "coldest_winter_temperature",
+               "distance_to_avfall")
 
-insect_sf <- read_sf("vector/insect_model_sf.geojson")  %>% 
+insect_sf <- st_read("vector/insect_model_sf.geojson")  %>% 
   select(all_of(keep_vars)) %>% 
   mutate(group = "insect",
          present = as.integer(species_richness > 0))
-plant_sf  <- read_sf("vector/plant_model_sf.geojson") %>% 
+plant_sf  <- st_read("vector/plant_model_sf.geojson") %>% 
   select(all_of(keep_vars))  %>% 
   mutate(group = "plant",
          present = as.integer(species_richness > 0))
 
 # predictors from script 10
 pred <- rast("raster/complete_prediction_stack.tif")
-pred <- pred[[keep_vars[2:12]]]
+pred <- pred[[keep_vars[2:13]]]
 
 rm(keep_vars)
 
@@ -50,7 +52,7 @@ set.seed(42)
 
 # determine spatial autocorrelation range (using raster stack)
 cv_range <- cv_spatial_autocor(pred, num_sample = 50000, plot = TRUE)
-cv_range$range # 15033.93
+cv_range$range # 9963.496
 
 # using point data (insects)
 cv_range_points <- cv_spatial_autocor(x = insect_sf, column = "present", 
@@ -60,14 +62,15 @@ cv_range_points$range # 3600.758
 # using point data (plants)
 cv_range_points <- cv_spatial_autocor(x = plant_sf, column = "present", 
                                       plot = TRUE)
-cv_range_points$range # 7274.908
+cv_range_points$range # 6538.501
 
-# 15 km (from raster value)
-block_m <- 15000 
+# changing block approach to account for smaller plant dataset
+block_i = 3600
+block_p <- 6500
 
-folds_insects <- cv_spatial(x = insect_sf, "present", k = 5, size = block_m,
+folds_insects <- cv_spatial(x = insect_sf, "present", k = 5, size = block_i,
                             selection = "random", iteration = 200)
-folds_plants <- cv_spatial(x = plant_sf, "present", k = 5, size = block_m,
+folds_plants <- cv_spatial(x = plant_sf, "present", k = 5, size = block_p,
                            selection = "random", iteration = 200)
 
 
@@ -77,7 +80,7 @@ folds_plants <- cv_spatial(x = plant_sf, "present", k = 5, size = block_m,
 
 # set up data
 preds_insects <- names(insect_sf %>% 
-                 select(neighbor_prct_impervious:distance_to_garden_center) %>% 
+                 select(neighbor_prct_impervious:distance_to_avfall) %>% 
                  st_drop_geometry())
 dat_insects <- insect_sf %>% st_drop_geometry()
 dat_insects$present <- as.integer(dat_insects$species_richness > 0)
@@ -153,7 +156,7 @@ tss_occ_insects
 
 # set up data
 preds_plants <- names(plant_sf %>% 
-                         select(neighbor_prct_impervious:distance_to_garden_center) %>% 
+                         select(neighbor_prct_impervious:distance_to_avfall) %>% 
                          st_drop_geometry())
 dat_plants <- plant_sf %>% st_drop_geometry()
 dat_plants$present <- as.integer(dat_plants$species_richness > 0)
@@ -203,7 +206,7 @@ r2_exp_plants   <- 1 - sum((obs_plants - expected_richness_plants)^2,
   sum((obs_plants - mean(obs_plants, na.rm=TRUE))^2, na.rm=TRUE)
 
 rmse_exp_plants
-r2_exp_plants
+r2_exp_plants # much lower R2 after filtering
 
 # metrics on occurrence part
 y_plants <- dat_plants$present
@@ -352,12 +355,14 @@ for (i in seq_along(folds_plants$folds_list)) {
   df_occ <- data.frame(present = train$present, train[, preds_plants, 
                                                       drop=FALSE])
   
+  # adjusted due to smaller sample size
   brt_bin <- gbm::gbm(
     formula = present ~ .,
     data = df_occ,
     distribution = "bernoulli",
-    n.trees = 5000, interaction.depth = 3,
-    shrinkage = 0.01, bag.fraction = 0.6,
+    n.trees = 5000, interaction.depth = 2,
+    shrinkage = 0.01, bag.fraction = 0.8,
+    n.minobsinnode = 5,
     cv.folds = 5, verbose = FALSE
   )
   best_iter_bin <- gbm::gbm.perf(brt_bin, method="cv", plot.it=FALSE)
@@ -379,8 +384,8 @@ for (i in seq_along(folds_plants$folds_list)) {
       formula = species_richness ~ .,
       data = df_mu,
       distribution = "gaussian",
-      n.trees = 5000, interaction.depth = 3,
-      shrinkage = 0.01, bag.fraction = 0.6,
+      n.trees = 5000, interaction.depth = 2,
+      shrinkage = 0.01, bag.fraction = 0.8,
       cv.folds = 5, verbose = FALSE
     )
     best_iter_mu <- gbm::gbm.perf(brt_mu, method="cv", plot.it=FALSE)
@@ -460,6 +465,7 @@ gam_mu_insects <- mgcv::gam(f_mu_insects, family=gaussian(),
 
 
 summary(gam_mu_insects)
+plot(gam_mu_insects)
 
 
 # 2-part GAM for plants
@@ -482,6 +488,7 @@ gam_mu_plants <- mgcv::gam(f_mu_plants, family=gaussian(),
                            data=dat_plants_pos, method="REML")
 
 summary(gam_mu_plants)
+plot(gam_mu_plants) # oh boy- this is a weird one
 
 
 # Predict w/GAMs ----------------------------------------------------------
@@ -552,8 +559,8 @@ brt_bin_plants <- gbm::gbm(
   formula = present ~ .,
   data = df_occ_plants,
   distribution = "bernoulli",
-  n.trees = 5000, interaction.depth = 3,
-  shrinkage = 0.01, bag.fraction = 0.6,
+  n.trees = 5000, interaction.depth = 2, # adjusted for smaller n
+  shrinkage = 0.01, bag.fraction = 0.8,
   cv.folds = 5, verbose = FALSE
 )
 best_iter_bin_plants <- gbm::gbm.perf(brt_bin_plants, method="cv", 
@@ -568,8 +575,8 @@ brt_mu_plants <- gbm::gbm(
   formula = species_richness ~ .,
   data = df_mu_plants,
   distribution = "gaussian",
-  n.trees = 5000, interaction.depth = 3,
-  shrinkage = 0.01, bag.fraction = 0.6,
+  n.trees = 5000, interaction.depth = 2,
+  shrinkage = 0.01, bag.fraction = 0.8,
   cv.folds = 5, verbose = FALSE
 )
 best_iter_mu_plants <- gbm::gbm.perf(brt_mu_plants, method="cv", 
@@ -606,7 +613,7 @@ mu_insects_brt <- terra::predict(
 )
 
 
-# mas to study area
+# mask to study area
 prob_insects_brt <- terra::mask(prob_insects_brt, expected_insects)
 mu_insects_brt   <- terra::mask(mu_insects_brt,  expected_insects)
 
@@ -791,6 +798,7 @@ mu_insects_ens <- terra::clamp(mu_insects_ens, lower = 0, upper = Inf)
 # expected richness (mask with GAM pred raster)
 expected_insects_ens <- prob_insects_ens * mu_insects_ens
 expected_insects_ens <- terra::mask(expected_insects_ens, expected_insects)
+plot(expected_insects_ens)
 
 # plants
 
@@ -804,6 +812,7 @@ mu_plants_ens <- terra::clamp(mu_plants_ens, lower = 0, upper = Inf)
 # expected richness (mask with GAM pred raster)
 expected_plants_ens <- prob_plants_ens * mu_plants_ens
 expected_plants_ens <- terra::mask(expected_plants_ens, expected_plants)
+plot(expected_plants_ens)
 
 
 # Comparison table --------------------------------------------------------
@@ -816,7 +825,6 @@ tss_ens_insects      <- as.numeric(tss_ens_insects[1])
 tss_occ_plants       <- as.numeric(tss_occ_plants[1])
 tss_occ_brt_plants   <- as.numeric(tss_occ_brt_plants[1])
 tss_ens_plants       <- as.numeric(tss_ens_plants[1])
-
 
 
 # summary table

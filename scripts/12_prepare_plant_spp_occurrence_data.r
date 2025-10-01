@@ -28,7 +28,8 @@ plants <- read_excel("/data/R/Prosjekter/15821000_tidlig_oppdagelse_og_varsling_
   rename(lokname = "locality_v3") %>%
   filter(year != 2018,
          !Fremmedartsstatus %in% c("Etablert per år 1800", "Ikke fremmed"),
-         Tvilsom != 1) 
+         Tvilsom != 1,
+         Potensiell_ny_art == 1) 
 
 
 # Make plants spatial -----------------------------------------------------

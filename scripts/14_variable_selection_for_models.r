@@ -63,12 +63,17 @@ joint_rf_importance <- function(plant_df, insect_df,
   combine_fun <- match.arg(combine_fun)
   
   # join datasets
-  joint_df <- plant_df %>%
+  # need to 'pad out' plants with NA to match nrow for insects
+  plant_vec <- rep(NA_real_, nrow(insect_df))
+  plant_vec[seq_len(nrow(plant_df))] <- plant_df$species_richness
+  
+  joint_df <- insect_df %>%
     select(-species_richness) %>%
     mutate(
-      plant  = plant_df$species_richness,
-      insect = insect_df$species_richness
+      insect = insect_df$species_richness,
+      plant  = plant_vec
     )
+  
   
   # tune mtry and nodesize
   message("Tuning mtry and nodesize...")
@@ -136,10 +141,12 @@ imp_joint <- joint_rf_importance(
          Importance_plant,
          Importance_insect,
          Importance_joint,
-         Importance_joint_max) # Optimal mtry = 24, nodesize = 1
+         Importance_joint_max) # Optimal mtry = 9, nodesize = 1
 
 imp_joint
 
+# importance values for plants have absolutely tanked when including
+# only potentially new invasives
 
 # model selection
 shared_selection_summary <- select_uncorrelated_joint(
@@ -198,7 +205,7 @@ ggplot(plot_data, aes(x = Rank, y = Importance, color = Group)) +
 final_table_ranked %>% print(n = 10)
 
 # all vars, ranked
-final_table_ranked %>% print(n = 19)
+final_table_ranked %>% print(n = 18)
 
 
 # Thoughts on selection ---------------------------------------------------
@@ -210,3 +217,7 @@ final_table_ranked %>% print(n = 19)
 # if we follow the variable importance curve for plants, it drops at 
 # distance to garden center
 # if we include all variables to that point, it will be 11
+
+# NB: this has changed dramatically after the plant filtering
+# suggest keeping distance to avfall, even though that means upping the
+# variables to 12
