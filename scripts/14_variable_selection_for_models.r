@@ -1,6 +1,8 @@
 # script to select predictor variables for models
 # Jenny Hansen
 # 27 September 2025
+# updated 02 October 2025 to try with 1000 bg pts
+# updated 08 October 2025 to include new survey data
 
 # working in TidligVarsling project
 
@@ -141,7 +143,7 @@ imp_joint <- joint_rf_importance(
          Importance_plant,
          Importance_insect,
          Importance_joint,
-         Importance_joint_max) # Optimal mtry = 9, nodesize = 1
+         Importance_joint_max) # Optimal mtry = 11, nodesize = 1
 
 imp_joint
 
@@ -219,5 +221,5 @@ final_table_ranked %>% print(n = 18)
 # if we include all variables to that point, it will be 11
 
 # NB: this has changed dramatically after the plant filtering
-# suggest keeping distance to avfall, even though that means upping the
-# variables to 12
+# suggest keeping percentage_roads (which is high importance for insects), 
+# even though that means upping the variables to 12

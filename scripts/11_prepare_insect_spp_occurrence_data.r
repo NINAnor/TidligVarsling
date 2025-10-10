@@ -1,11 +1,10 @@
 # Script to import insect data from Artskart and filter for potential new 
 # invasive species to augment data collected by TidligVarsling surveys
 # Jenny Hansen
-# NB: waiting on new 'harmonized' insect data
 # 25 September 2025
+# updated 08 October 2025 after receiving new survey data
 
 # working in TidligVarsling project
-
 
 # Load required libraries -------------------------------------------------
 
@@ -26,7 +25,10 @@ ssb <- st_read("vector/ssb250_studyarea.shp")
 
 # tv insect species
 insects <- st_read("vector/cleaned_insect_data.geojson") %>% 
-  filter(final_sublist %in% c("potensiell_fremmede", "d\xf8rstokkart")) %>% 
+  filter(final_sublist %in% c("potensiell_fremmede", 
+                              "potensiell_fremmede_with_norsk_GBIF_occurrences", 
+                              "not_in_GBIF",
+                              "d\xf8rstokkart")) %>% 
   mutate(final_species_clean = str_replace_all(final_species, "_", " "))
 
 # potential new sf

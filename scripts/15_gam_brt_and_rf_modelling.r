@@ -2,6 +2,7 @@
 # test predictive ability and generate weights for ensemble models
 # Jenny Hansen
 # 29 September 2025
+# updated 02 October 2025 to try with 1000 bg pts
 
 # working in TidligVarsling project
 
@@ -17,6 +18,7 @@ library(blockCV)
 library(terra)
 library(tibble)
 library(randomForest)
+library(maxnet)
 library(ggplot2)
 library(viridis)
 
@@ -26,13 +28,13 @@ library(viridis)
 # variables were selected in script 14
 # NB: these changed after filtering plants and re-doing the joint RF
 keep_vars <- c("species_richness",
-               "neighbor_prct_impervious", "percentage_buildings", 
-               "distance_to_lumberyard", "ndvi_stdDev",
-               "distance_to_industrial_area", "distance_to_private_road", 
-               "ndwi_median", "ndvi_summer", "neighbor_prct_open",
-               "percentage_agriculture", "coldest_winter_temperature",
-               "distance_to_avfall")
+               "neighbor_prct_impervious", "ndvi_stdDev", 
+               "distance_to_lumberyard","distance_to_private_road", 
+               "ndwi_median", "distance_to_industrial_area", "enebolig_density",
+               "ndvi_summer", "distance_to_avfall", "percentage_forest",
+               "coldest_winter_temperature", "neighbor_prct_open")
 
+# GAM, BRT, and RF data
 insect_sf <- st_read("vector/insect_model_sf.geojson")  %>% 
   select(all_of(keep_vars)) %>% 
   mutate(group = "insect",
@@ -41,6 +43,23 @@ plant_sf  <- st_read("vector/plant_model_sf.geojson") %>%
   select(all_of(keep_vars))  %>% 
   mutate(group = "plant",
          present = as.integer(species_richness > 0))
+
+# maxent data
+insect_me <- st_read("vector/insect_maxent_data.geojson")
+plant_me <- st_read("vector/plant_maxent_data.geojson")
+
+insect_me_df <- insect_me %>%
+  st_drop_geometry() %>%
+  select(presence, all_of(keep_vars[2:13])) %>%
+  mutate(across(all_of(keep_vars[2:13]), as.numeric))  %>% 
+  tidyr::drop_na()
+
+plant_me_df <- plant_me %>%
+  st_drop_geometry() %>%
+  select(presence, all_of(keep_vars[2:13])) %>%
+  mutate(across(all_of(keep_vars[2:13]), as.numeric)) %>% 
+  tidyr::drop_na()
+
 
 # predictors from script 10
 pred <- rast("raster/complete_prediction_stack.tif")
@@ -55,21 +74,21 @@ set.seed(42)
 
 # determine spatial autocorrelation range (using raster stack)
 cv_range <- cv_spatial_autocor(pred, num_sample = 50000, plot = TRUE)
-cv_range$range # 9963.496
+cv_range$range # 10262.06
 
 # using point data (insects)
 cv_range_points <- cv_spatial_autocor(x = insect_sf, column = "present", 
                                       plot = TRUE)
-cv_range_points$range # 3600.758
+cv_range_points$range # 3600.751
 
 # using point data (plants)
 cv_range_points <- cv_spatial_autocor(x = plant_sf, column = "present", 
                                       plot = TRUE)
-cv_range_points$range # 6538.501
+cv_range_points$range # 17262.99
 
 # changing block approach to account for smaller plant dataset
 block_i = 3600
-block_p <- 6500
+block_p <- 17263
 
 folds_insects <- cv_spatial(x = insect_sf, "present", k = 5, size = block_i,
                             selection = "random", iteration = 200)
@@ -83,8 +102,8 @@ folds_plants <- cv_spatial(x = plant_sf, "present", k = 5, size = block_p,
 
 # set up data
 preds_insects <- names(insect_sf %>% 
-                 select(neighbor_prct_impervious:distance_to_avfall) %>% 
-                 st_drop_geometry())
+                         select(neighbor_prct_impervious:neighbor_prct_open) %>% 
+                         st_drop_geometry())
 dat_insects <- insect_sf %>% st_drop_geometry()
 dat_insects$present <- as.integer(dat_insects$species_richness > 0)
 
@@ -159,8 +178,8 @@ tss_occ_insects
 
 # set up data
 preds_plants <- names(plant_sf %>% 
-                         select(neighbor_prct_impervious:distance_to_avfall) %>% 
-                         st_drop_geometry())
+                        select(neighbor_prct_impervious:neighbor_prct_open) %>% 
+                        st_drop_geometry())
 dat_plants <- plant_sf %>% st_drop_geometry()
 dat_plants$present <- as.integer(dat_plants$species_richness > 0)
 
@@ -203,9 +222,9 @@ expected_richness_plants <- oof_prob_plants * oof_mu_plants
 
 # metrics on the conditional part
 rmse_exp_plants <- sqrt(mean((expected_richness_plants - obs_plants)^2, 
-                              na.rm=TRUE))
+                             na.rm=TRUE))
 r2_exp_plants   <- 1 - sum((obs_plants - expected_richness_plants)^2, 
-                            na.rm=TRUE) /
+                           na.rm=TRUE) /
   sum((obs_plants - mean(obs_plants, na.rm=TRUE))^2, na.rm=TRUE)
 
 rmse_exp_plants
@@ -299,10 +318,10 @@ for (i in seq_along(folds_insects$folds_list)) {
 expected_richness_brt_insects <- oof_prob_brt_insects * oof_mu_brt_insects
 rmse_brt_insects <- sqrt(mean((expected_richness_brt_insects - 
                                  dat_insects$species_richness)^2, 
-                      na.rm=TRUE))
+                              na.rm=TRUE))
 r2_brt_insects <- 1 - sum((dat_insects$species_richness - 
                              expected_richness_brt_insects)^2, 
-                    na.rm=TRUE) /
+                          na.rm=TRUE) /
   sum((dat_insects$species_richness - mean(dat_insects$species_richness))^2, 
       na.rm=TRUE)
 
@@ -364,8 +383,8 @@ for (i in seq_along(folds_plants$folds_list)) {
     data = df_occ,
     distribution = "bernoulli",
     n.trees = 5000, interaction.depth = 2,
-    shrinkage = 0.01, bag.fraction = 0.8,
-    n.minobsinnode = 5,
+    shrinkage = 0.01, bag.fraction = 0.6,
+    n.minobsinnode = 3,
     cv.folds = 5, verbose = FALSE
   )
   best_iter_bin <- gbm::gbm.perf(brt_bin, method="cv", plot.it=FALSE)
@@ -388,8 +407,11 @@ for (i in seq_along(folds_plants$folds_list)) {
       data = df_mu,
       distribution = "gaussian",
       n.trees = 5000, interaction.depth = 2,
-      shrinkage = 0.01, bag.fraction = 0.8,
-      cv.folds = 5, verbose = FALSE
+      shrinkage = 0.01,
+      bag.fraction = 0.6,
+      n.minobsinnode = 3,
+      cv.folds = 5,
+      verbose = FALSE
     )
     best_iter_mu <- gbm::gbm.perf(brt_mu, method="cv", plot.it=FALSE)
     
@@ -408,10 +430,10 @@ for (i in seq_along(folds_plants$folds_list)) {
 expected_richness_brt_plants <- oof_prob_brt_plants * oof_mu_brt_plants
 rmse_brt_plants <- sqrt(mean((expected_richness_brt_plants - 
                                 dat_plants$species_richness)^2, 
-                      na.rm=TRUE))
+                             na.rm=TRUE))
 r2_brt_plants   <- 1 - sum((dat_plants$species_richness - 
                               expected_richness_brt_plants)^2, 
-                    na.rm=TRUE) /
+                           na.rm=TRUE) /
   sum((dat_plants$species_richness - mean(dat_plants$species_richness))^2, 
       na.rm=TRUE)
 
@@ -424,7 +446,7 @@ prob_occ_brt_plants <- oof_prob_brt_plants
 
 
 auc_occ_brt_plants <- pROC::auc(y_occ_brt_plants, 
-                                 prob_occ_brt_plants)
+                                prob_occ_brt_plants)
 
 thresh_brt_plants <- PresenceAbsence::optimal.thresholds(
   data.frame(id=1:length(y_occ_brt_plants),
@@ -589,6 +611,120 @@ auc_rf_plants
 tss_rf_plants
 
 
+# Run MaxEnt- insects -----------------------------------------------------
+
+# prep data
+X_insects <- insect_me_df[, -1]   
+y_insects <- insect_me_df$presence
+
+# initialize storage for out-of-fold predictions
+oof_prob_insects_me <- rep(NA_real_, nrow(insect_me_df))
+
+# loop over folds
+for (i in seq_along(folds_insects$folds_list)) {
+  idx_train <- folds_insects$folds_list[[i]][[1]]
+  idx_test  <- folds_insects$folds_list[[i]][[2]]
+  
+  # Fit model on training data
+  m_insect_fold <- maxnet(
+    p = y_insects[idx_train],
+    data = X_insects[idx_train, ],
+    f = maxnet.formula(p = y_insects[idx_train],
+                       data = X_insects[idx_train, ],
+                       classes = "lqph")
+  )
+  
+  # predict test fold
+  oof_prob_insects_me[idx_test] <- predict(
+    m_insect_fold,
+    newdata = X_insects[idx_test, ],
+    type = "cloglog"
+  )
+}
+
+# evaluate performance
+eval_df_insects <- data.frame(
+  observed = y_insects,
+  predicted = oof_prob_insects_me
+) %>% filter(!is.na(predicted))
+
+auc_insects_me <- pROC::auc(eval_df_insects$observed, eval_df_insects$predicted)
+
+thresh_insects_me <- PresenceAbsence::optimal.thresholds(
+  data.frame(id=1:nrow(eval_df_insects), eval_df_insects),
+  opt.methods="MaxSens+Spec"
+)[1,"predicted"]
+
+cm_insects_me <- PresenceAbsence::cmx(
+  data.frame(id=1:nrow(eval_df_insects), eval_df_insects),
+  threshold=thresh_insects_me
+)
+
+tss_insects_me <- PresenceAbsence::sensitivity(cm_insects_me) +
+  PresenceAbsence::specificity(cm_insects_me) - 1
+
+# performance metrics
+auc_insects_me
+tss_insects_me
+
+
+# Run MaxEnt- plants ------------------------------------------------------
+
+# prep data
+X_plants <- plant_me_df[, -1]   
+y_plants <- plant_me_df$presence
+
+# initialize storage for out-of-fold predictions
+oof_prob_plants_me <- rep(NA_real_, nrow(plant_me_df))
+
+# loop over folds
+for (i in seq_along(folds_plants$folds_list)) {
+  idx_train <- folds_plants$folds_list[[i]][[1]]
+  idx_test  <- folds_plants$folds_list[[i]][[2]]
+  
+  # Fit model on training data
+  m_insect_fold <- maxnet(
+    p = y_plants[idx_train],
+    data = X_plants[idx_train, ],
+    f = maxnet.formula(p = y_plants[idx_train],
+                       data = X_plants[idx_train, ],
+                       classes = "lqph")
+  )
+  
+  # predict test fold
+  oof_prob_plants_me[idx_test] <- predict(
+    m_insect_fold,
+    newdata = X_plants[idx_test, ],
+    type = "cloglog"
+  )
+}
+
+# evaluate performance
+eval_df_plants <- data.frame(
+  observed = y_plants,
+  predicted = oof_prob_plants_me
+) %>% filter(!is.na(predicted))
+
+auc_plants_me <- pROC::auc(eval_df_plants$observed, eval_df_plants$predicted)
+
+thresh_plants_me <- PresenceAbsence::optimal.thresholds(
+  data.frame(id=1:nrow(eval_df_plants), eval_df_plants),
+  opt.methods="MaxSens+Spec"
+)[1,"predicted"]
+
+cm_plants_me <- PresenceAbsence::cmx(
+  data.frame(id=1:nrow(eval_df_plants), eval_df_plants),
+  threshold=thresh_plants_me
+)
+
+tss_plants_me <- PresenceAbsence::sensitivity(cm_plants_me) +
+  PresenceAbsence::specificity(cm_plants_me) - 1
+
+# performance metrics
+auc_plants_me
+tss_plants_me
+
+
 # Fit final GAMs ----------------------------------------------------------
 
 # 2-part (hurdle) GAM for insects
@@ -612,7 +748,7 @@ gam_mu_insects <- mgcv::gam(f_mu_insects, family=gaussian(),
 
 
 summary(gam_mu_insects)
-plot(gam_mu_insects)
+#plot(gam_mu_insects)
 
 
 # 2-part GAM for plants
@@ -635,7 +771,7 @@ gam_mu_plants <- mgcv::gam(f_mu_plants, family=gaussian(),
                            data=dat_plants_pos, method="REML")
 
 summary(gam_mu_plants)
-plot(gam_mu_plants) # oh boy- this is a weird one
+#plot(gam_mu_plants) # oh boy- this is a weird one
 
 
 # Predict w/GAMs ----------------------------------------------------------
@@ -700,7 +836,7 @@ summary(brt_mu_insects)
 
 # prob of presence
 df_occ_plants <- data.frame(present = dat_plants$present,
-                             dat_plants[, preds_plants, drop=FALSE])
+                            dat_plants[, preds_plants, drop=FALSE])
 
 brt_bin_plants <- gbm::gbm(
   formula = present ~ .,
@@ -716,7 +852,7 @@ best_iter_bin_plants <- gbm::gbm.perf(brt_bin_plants, method="cv",
 # conditional richness
 dat_plants_pos <- dat_plants[dat_plants$present == 1, ]
 df_mu_plants <- data.frame(species_richness = dat_plants_pos$species_richness,
-                            dat_plants_pos[, preds_plants, drop=FALSE])
+                           dat_plants_pos[, preds_plants, drop=FALSE])
 
 brt_mu_plants <- gbm::gbm(
   formula = species_richness ~ .,
@@ -803,7 +939,6 @@ expected_plants_brt <- prob_plants_brt * mu_plants_brt
 plot(expected_plants_brt)
 
 
-
 # Fit final RFs -----------------------------------------------------------
 
 # insects
@@ -811,7 +946,7 @@ plot(expected_plants_brt)
 rf_bin_insects <- randomForest(
   x = dat_insects[, preds_insects, drop=FALSE],
   y = as.factor(dat_insects$present),
-  ntree = 1000, mtry = floor(sqrt(length(preds_insects)))
+  ntree = 10000, mtry = floor(sqrt(length(preds_insects)))
 )
 
 # conditional richness (regression, presence only)
@@ -819,7 +954,7 @@ dat_insects_pos <- dat_insects[dat_insects$present == 1, ]
 rf_mu_insects <- randomForest(
   x = dat_insects_pos[, preds_insects, drop=FALSE],
   y = dat_insects_pos$species_richness,
-  ntree = 1000, mtry = floor(sqrt(length(preds_insects)))
+  ntree = 10000, mtry = floor(sqrt(length(preds_insects)))
 )
 
 # plants
@@ -827,7 +962,7 @@ rf_mu_insects <- randomForest(
 rf_bin_plants <- randomForest(
   x = dat_plants[, preds_plants, drop=FALSE],
   y = as.factor(dat_plants$present),
-  ntree = 1000, mtry = floor(sqrt(length(preds_plants)))
+  ntree = 10000, mtry = floor(sqrt(length(preds_plants)))
 )
 
 # conditional richness (regression, presence only)
@@ -835,7 +970,7 @@ dat_plants_pos <- dat_plants[dat_plants$present == 1, ]
 rf_mu_plants <- randomForest(
   x = dat_plants_pos[, preds_plants, drop=FALSE],
   y = dat_plants_pos$species_richness,
-  ntree = 1000, mtry = floor(sqrt(length(preds_plants)))
+  ntree = 10000, mtry = floor(sqrt(length(preds_plants)))
 )
 
 
@@ -874,14 +1009,20 @@ mu_insects_rf <- terra::predict(
   }
 )
 
+
+
 # mask to study area
 prob_insects_rf <- terra::mask(prob_insects_rf, expected_insects)
+writeRaster(prob_insects_rf, "raster/insect_prob_rf.tif")
 mu_insects_rf   <- terra::mask(mu_insects_rf, expected_insects)
+writeRaster(mu_insects_rf, "raster/insect_rich_rf.tif")
 
 # combine for expected richness
 expected_insects_rf <- prob_insects_rf * mu_insects_rf
 plot(expected_insects_rf)
 
+# write out because this takes forever
+writeRaster(expected_insects_rf, "raster/insect_pred_rich_rf.tif")
 
 # plants
 
@@ -919,11 +1060,103 @@ mu_plants_rf <- terra::predict(
 
 # mask to study area
 prob_plants_rf <- terra::mask(prob_plants_rf, expected_plants)
+writeRaster(prob_plants_rf, "raster/plant_prob_rf.tif")
 mu_plants_rf   <- terra::mask(mu_plants_rf, expected_plants)
+writeRaster(mu_plants_rf, "raster/plant_rich_rf.tif")
 
 # combine for expected richness
 expected_plants_rf <- prob_plants_rf * mu_plants_rf
 plot(expected_plants_rf)
+
+# write out because this takes forever
+writeRaster(expected_plants_rf, "raster/plant_pred_rich_rf.tif")
+
+# Fit final MaxEnt --------------------------------------------------------
+
+
+# Prepare data
+X_insects <- insect_me_df[, -1]  # predictors
+y_insects <- insect_me_df$presence  # presence/background
+
+# Fit final MaxEnt model using all data
+final_maxent_insects <- maxnet(
+  p = y_insects,
+  data = X_insects,
+  f = maxnet.formula(
+    p = y_insects,
+    data = X_insects,
+    classes = "lqph"  # linear, quadratic, product, hinge
+  ),
+  regmult = 1.5  # optional: regularization to avoid overfitting
+)
+
+summary(final_maxent_insects)
+plot(final_maxent_insects) 
+
+# plants
+
+X_plants <- plant_me_df[, -1]  
+y_plants <- plant_me_df$presence  
+
+# fit final MaxEnt model using all data
+final_maxent_plants <- maxnet(
+  p = y_plants,
+  data = X_plants,
+  f = maxnet.formula(
+    p = y_plants,
+    data = X_plants,
+    classes = "lqph"
+  ),
+  regmult = 1.5
+)
+
+summary(final_maxent_plants)
+plot(final_maxent_plants) 
+
+
+
+# Predict from MaxEnt -----------------------------------------------------
+
+# insects
+
+# Define a safe wrapper function for prediction
+maxnet_pred_fun <- function(model, data) {
+  data_df <- as.data.frame(data)
+  preds <- predict(model, newdata = data_df, type = "cloglog")
+  as.numeric(preds)  # ensure vector output
+}
+
+# Predict across raster stack using custom function
+prob_insects_me <- terra::predict(
+  pred,
+  final_maxent_insects,
+  fun = maxnet_pred_fun,
+  na.rm = TRUE
+)
+
+# mask to study area
+prob_insects_me <- terra::mask(prob_insects_me, expected_insects)
+
+# plot 
+plot(prob_insects_me)
+
+
+# plants
+
+# Predict across raster stack
+prob_plants_me <- terra::predict(
+  pred,
+  final_maxent_plants,
+  fun = maxnet_pred_fun,
+  na.rm = TRUE
+)
+
+# Mask to study area
+prob_plants_me <- terra::mask(prob_plants_me, expected_plants)
+
+# Plot and save
+plot(prob_plants_me)
+
 
 # Compute ensemble weights ------------------------------------------------
 
@@ -951,8 +1184,10 @@ norm2 <- function(v) v / sum(v, na.rm=TRUE)
 w_occ_insects <- norm2(c(
   GAM = as.numeric(auc_occ_insects) - 0.5,
   BRT = as.numeric(auc_occ_brt_insects) - 0.5,
-  RF  = as.numeric(auc_rf_insects) - 0.5
+  RF  = as.numeric(auc_rf_insects) - 0.5,
+  ME  = as.numeric(auc_insects_me) - 0.5
 ))
+w_occ_insects
 
 w_mu_insects <- norm2(c(
   GAM = 1/(rmse_mu_insects_gam^2),
@@ -981,8 +1216,11 @@ rmse_mu_plants_rf  <- sqrt(mean((oof_mu_rf_plants[is_pos_plants] -
 w_occ_plants <- norm2(c(
   GAM = as.numeric(auc_occ_plants) - 0.5,
   BRT = as.numeric(auc_occ_brt_plants) - 0.5,
-  RF  = as.numeric(auc_rf_plants) - 0.5
+  RF  = as.numeric(auc_rf_plants) - 0.5,
+  ME  = as.numeric(auc_plants_me) - 0.5
 ))
+w_occ_plants
+
 
 w_mu_plants <- norm2(c(
   GAM = 1/(rmse_mu_plants_gam^2),
@@ -993,12 +1231,11 @@ w_mu_plants <- norm2(c(
 w_occ_plants; w_mu_plants
 
 
-
 # Ensemble model ----------------------------------------------------------
 
 # insects
 
-# OOF ensemble
+# OOF ensemble (cannot include maxent here because it has more bg pts)
 ens_prob_insects <- w_occ_insects["GAM"] * oof_prob_insects +
   w_occ_insects["BRT"] * oof_prob_brt_insects +
   w_occ_insects["RF"]  * oof_prob_rf_insects
@@ -1091,9 +1328,13 @@ tss_ens_plants
 # Predict from ensemble model ---------------------------------------------
 
 # insects
-prob_insects_ens <- w_occ_insects["GAM"] * prob_insects +
-  w_occ_insects["BRT"] * prob_insects_brt +
-  w_occ_insects["RF"]  * prob_insects_rf
+
+# can include maxent here
+prob_insects_ens <- prob_insects * w_occ_insects["GAM"] +
+  prob_insects_brt  * w_occ_insects["BRT"] +
+  prob_insects_rf   * w_occ_insects["RF"]  +
+  prob_insects_me   * w_occ_insects["ME"]   
+
 
 mu_insects_ens <- w_mu_insects["GAM"] * mu_insects +
   w_mu_insects["BRT"] * mu_insects_brt +
@@ -1103,11 +1344,13 @@ mu_insects_ens <- terra::clamp(mu_insects_ens, lower = 0, upper = Inf)
 expected_insects_ens <- prob_insects_ens * mu_insects_ens
 expected_insects_ens <- terra::mask(expected_insects_ens, expected_insects)
 plot(expected_insects_ens)
+writeRaster(expected_insects_ens, "raster/ensemble_prediction_insects.tif")
 
 # plants
-prob_plants_ens <- w_occ_plants["GAM"] * prob_plants +
-  w_occ_plants["BRT"] * prob_plants_brt +
-  w_occ_plants["RF"]  * prob_plants_rf
+prob_plants_ens <- prob_plants * w_occ_plants["GAM"] +
+  prob_plants_brt  * w_occ_plants["BRT"] +
+  prob_plants_rf   * w_occ_plants["RF"]  +
+  prob_plants_me   * w_occ_plants["ME"]   
 
 mu_plants_ens <- w_mu_plants["GAM"] * mu_plants +
   w_mu_plants["BRT"] * mu_plants_brt +
@@ -1117,50 +1360,56 @@ mu_plants_ens <- terra::clamp(mu_plants_ens, lower = 0, upper = Inf)
 expected_plants_ens <- prob_plants_ens * mu_plants_ens
 expected_plants_ens <- terra::mask(expected_plants_ens, expected_plants)
 plot(expected_plants_ens)
-
+writeRaster(expected_plants_ens, "raster/ensemble_prediction_plants.tif")
 
 # Comparison table --------------------------------------------------------
 
 # Convert all TSS objects to plain numeric values
-tss_occ_insects <- as.numeric(tss_occ_insects[1])
+tss_occ_insects     <- as.numeric(tss_occ_insects[1])
 tss_occ_brt_insects <- as.numeric(tss_occ_brt_insects[1])
-tss_rf_insects <- as.numeric(tss_rf_insects[1])
-tss_ens_insects <- as.numeric(tss_ens_insects[1])
+tss_rf_insects      <- as.numeric(tss_rf_insects[1])
+tss_ens_insects     <- as.numeric(tss_ens_insects[1])
+tss_insects_me      <- as.numeric(tss_insects_me[1])  # <- added
 
-tss_occ_plants <- as.numeric(tss_occ_plants[1])
-tss_occ_brt_plants <- as.numeric(tss_occ_brt_plants[1])
-tss_rf_plants <- as.numeric(tss_rf_plants[1])
-tss_ens_plants <- as.numeric(tss_ens_plants[1])
+tss_occ_plants      <- as.numeric(tss_occ_plants[1])
+tss_occ_brt_plants  <- as.numeric(tss_occ_brt_plants[1])
+tss_rf_plants       <- as.numeric(tss_rf_plants[1])
+tss_ens_plants      <- as.numeric(tss_ens_plants[1])
+tss_plants_me       <- as.numeric(tss_plants_me[1])   # <- added
 
 
-# summary table
+# summary table including MaxEnt
 summary_df <- tibble::tribble(
-  ~Taxon,   ~Model,     ~RMSE,                ~R2,                 ~AUC,                        ~TSS,
-  "Insects","GAM",      rmse_exp_insects,     r2_exp_insects,      as.numeric(auc_occ_insects), tss_occ_insects,
+  ~Taxon,   ~Model,     ~RMSE,                ~R2,                 ~AUC,                          ~TSS,
+  # insects
+  "Insects","GAM",      rmse_exp_insects,     r2_exp_insects,      as.numeric(auc_occ_insects),   tss_occ_insects,
   "Insects","BRT",      rmse_brt_insects,     r2_brt_insects,      as.numeric(auc_occ_brt_insects), tss_occ_brt_insects,
-  "Insects","RF",       rmse_rf_insects,      r2_rf_insects,       as.numeric(auc_rf_insects),  tss_rf_insects,
-  "Insects","Ensemble", rmse_ens_insects,     r2_ens_insects,      as.numeric(auc_ens_insects), tss_ens_insects,
-  "Plants", "GAM",      rmse_exp_plants,      r2_exp_plants,       as.numeric(auc_occ_plants),  tss_occ_plants,
+  "Insects","RF",       rmse_rf_insects,      r2_rf_insects,       as.numeric(auc_rf_insects),    tss_rf_insects,
+  "Insects","MaxEnt",   NA,                   NA,                  as.numeric(auc_insects_me),    tss_insects_me,  # <- added
+  "Insects","Ensemble", rmse_ens_insects,     r2_ens_insects,      as.numeric(auc_ens_insects),   tss_ens_insects,
+  
+  # plants
+  "Plants", "GAM",      rmse_exp_plants,      r2_exp_plants,       as.numeric(auc_occ_plants),    tss_occ_plants,
   "Plants", "BRT",      rmse_brt_plants,      r2_brt_plants,       as.numeric(auc_occ_brt_plants), tss_occ_brt_plants,
-  "Plants", "RF",       rmse_rf_plants,       r2_rf_plants,        as.numeric(auc_rf_plants),   tss_rf_plants,
-  "Plants", "Ensemble", rmse_ens_plants,      r2_ens_plants,       as.numeric(auc_ens_plants),  tss_ens_plants
+  "Plants", "RF",       rmse_rf_plants,       r2_rf_plants,        as.numeric(auc_rf_plants),     tss_rf_plants,
+  "Plants", "MaxEnt",   NA,                   NA,                  as.numeric(auc_plants_me),     tss_plants_me,   # <- added
+  "Plants", "Ensemble", rmse_ens_plants,      r2_ens_plants,       as.numeric(auc_ens_plants),    tss_ens_plants
 ) %>%
   dplyr::mutate(across(where(is.numeric), \(x) round(x, 3)))
 
 
 summary_df
 
-
 # Comparison plot ---------------------------------------------------------
 
 # pivot data
 summary_long <- summary_df %>%
   tidyr::pivot_longer(cols = c(RMSE, R2, AUC, TSS),
-               names_to = "Metric", values_to = "Value")
+                      names_to = "Metric", values_to = "Value")
 
 # ensure Model order 
 summary_long$Model <- factor(summary_long$Model, 
-                             levels = c("GAM","BRT","RF","Ensemble"))
+                             levels = c("GAM", "BRT", "RF", "MaxEnt", "Ensemble"))
 
 # compute relative performance within each Taxon × Metric group
 summary_long <- summary_long %>%
@@ -1179,7 +1428,7 @@ ggplot(summary_long, aes(x = Metric, y = Value,
   geom_col(position = position_dodge(width = 0.8), width = 0.7) +
   facet_wrap(~ Taxon, scales = "free_y") +
   scale_fill_viridis_c(option = "plasma", direction = -1) +
-  labs(title = "Model performance comparison",
+  labs(title = "Model performance comparison (225 bg pts)",
        y = "Metric value", x = "Performance metric", fill = "Relative\nperformance") +
   theme_minimal(base_size = 14) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
@@ -1191,7 +1440,9 @@ ggplot(summary_long, aes(x = Metric, y = Value,
 
 # Export models -----------------------------------------------------------
 
-# individual models
+# save individual models 
+
+# insects
 saveRDS(gam_bin_insects, "models/gam_bin_insects.rds")
 saveRDS(gam_mu_insects,  "models/gam_mu_insects.rds")
 saveRDS(brt_bin_insects, "models/brt_bin_insects.rds")
@@ -1199,7 +1450,9 @@ saveRDS(brt_mu_insects,  "models/brt_mu_insects.rds")
 saveRDS(rf_bin_insects,  "models/rf_bin_insects.rds")
 saveRDS(rf_mu_insects,   "models/rf_mu_insects.rds")
 saveRDS(ens_mu_insects,  "models/ens_mu_insects.rds")
+saveRDS(final_maxent_insects, "models/maxent_insects.rds")  
 
+# plants
 saveRDS(gam_bin_plants, "models/gam_bin_plants.rds")
 saveRDS(gam_mu_plants,  "models/gam_mu_plants.rds")
 saveRDS(brt_bin_plants, "models/brt_bin_plants.rds")
@@ -1207,6 +1460,49 @@ saveRDS(brt_mu_plants,  "models/brt_mu_plants.rds")
 saveRDS(rf_bin_plants,  "models/rf_bin_plants.rds")
 saveRDS(rf_mu_plants,   "models/rf_mu_plants.rds")
 saveRDS(ens_mu_plants,  "models/ens_mu_plants.rds")
+saveRDS(final_maxent_plants, "models/maxent_plants.rds")    
+
+# all models in one list 
+
+all_models <- list(
+  insects = list(
+    GAM = list(bin = gam_bin_insects, mu = gam_mu_insects),
+    BRT = list(bin = brt_bin_insects, mu = brt_mu_insects),
+    RF  = list(bin = rf_bin_insects,  mu = rf_mu_insects),
+    ME  = final_maxent_insects, 
+    ENS = ens_mu_insects
+  ),
+  plants = list(
+    GAM = list(bin = gam_bin_plants, mu = gam_mu_plants),
+    BRT = list(bin = brt_bin_plants, mu = brt_mu_plants),
+    RF  = list(bin = rf_bin_plants,  mu = rf_mu_plants),
+    ME  = final_maxent_plants,    
+    ENS = ens_mu_plants
+  )
+)
+
+saveRDS(all_models, "models/all_models.rds")
+
+
+
+# Models with 1000 bg pts -------------------------------------------------
+
+# individual models
+saveRDS(gam_bin_insects, "models/gam_bin_insects_1000.rds")
+saveRDS(gam_mu_insects,  "models/gam_mu_insects_1000.rds")
+saveRDS(brt_bin_insects, "models/brt_bin_insects_1000.rds")
+saveRDS(brt_mu_insects,  "models/brt_mu_insects_1000.rds")
+saveRDS(rf_bin_insects,  "models/rf_bin_insects_1000.rds")
+saveRDS(rf_mu_insects,   "models/rf_mu_insects_1000.rds")
+saveRDS(ens_mu_insects,  "models/ens_mu_insects_1000.rds")
+
+saveRDS(gam_bin_plants, "models/gam_bin_plants_1000.rds")
+saveRDS(gam_mu_plants,  "models/gam_mu_plants_1000.rds")
+saveRDS(brt_bin_plants, "models/brt_bin_plants_1000.rds")
+saveRDS(brt_mu_plants,  "models/brt_mu_plants_1000.rds")
+saveRDS(rf_bin_plants,  "models/rf_bin_plants_1000.rds")
+saveRDS(rf_mu_plants,   "models/rf_mu_plants_1000.rds")
+saveRDS(ens_mu_plants,  "models/ens_mu_plants_1000.rds")
 
 
 # all in a list
@@ -1225,5 +1521,4 @@ all_models <- list(
   )
 )
 
-saveRDS(all_models, "models/all_models.rds")
-
+saveRDS(all_models, "models/all_models_1000.rds")

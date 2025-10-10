@@ -1,6 +1,7 @@
 # Script to prepare data for modeling and check for collinearity
 # Jenny Hansen
 # 26 September 2025
+# updated 08 Oct 2025 to include new survey data & get maxent bg pts
 
 # working in TidligVarsling project
 
@@ -11,6 +12,7 @@ library(sf)
 library(terra)
 library(corrplot)
 library(exactextractr)
+library(spatstat.random)
 
 # Import data -------------------------------------------------------------
 
@@ -85,14 +87,14 @@ aoi_background <- st_difference(aoi_land, exclusion_zone)
 set.seed(42)
 
 # NB: these bg points are for GAM and BRT only
-# I am going with an initial 1:3 sample design
+# I am going with an initial 1:3 sample design (higher for plants)
 
 # insect bg pts
 insect_pa <- st_sample(aoi_background, size = 225)
 insect_pa <- st_as_sf(insect_pa)
 
 # plants bg pts
-plants_pa <- st_sample(aoi_background, size = 132)
+plants_pa <- st_sample(aoi_background, size = 225)
 plants_pa <- st_as_sf(plants_pa)
 
 
@@ -163,11 +165,9 @@ sum(is.na(insect_vars)) # 0
 plant_vars <- plant_pred %>%
   select(where(is.numeric)) %>%
   select(-species_richness)
-sum(is.na(plant_vars)) # 0
+sum(is.na(plant_vars)) # 1
 
-# NB: after filtering the plant data & drawing only 132 pseudoabsences, there
-# are no NAs in the data; skipping the replacement below
-
+# NB: there is 1 pseudoabsence NA- resmapling and replacing below
 
 # Replace NA sample -------------------------------------------------------
 
@@ -177,7 +177,7 @@ sum(is.na(plant_vars)) # 0
 bad_idx <- which(!complete.cases(plant_vars))
 
 # remove it
-bad_point <- plant_full[bad_idx, ]   # 229 pseudo_154 
+bad_point <- plant_full[bad_idx, ]   # 198 pseudo_154 
 plant_full <- plant_full[-bad_idx, ]
 plant_vars <- plant_vars[-bad_idx, ]
 
@@ -206,6 +206,98 @@ plant_vars <- bind_rows(plant_vars, new_pred)
 sum(is.na(plant_vars)) # 0    
 
 
+# Create background data for MaxEnt (presence–background) -----------------
+
+# using spatstat random to ensure pts are >= 1000 m apart, as in Ida's method
+
+# after many NAs, I see the extent of aoi is slightly larger that the 
+# prediction raster; clipping below
+aoi_clip <- st_as_sfc(st_bbox(pred)) %>%
+  st_sf(crs = st_crs(pred))
+
+# intersect aoi with extent of pred rasters
+aoi_clipped <- st_intersection(aoi_land, aoi_clip)
+
+# fix geometry to work with spatstat
+aoi_fixed <- aoi_clipped %>% 
+  st_make_valid() %>% 
+  st_collection_extract("POLYGON") %>% 
+  st_union() %>%                 
+  st_cast("MULTIPOLYGON") %>%    
+  st_sf()
+
+# convert to a spatstat window (necessary for enforcing dist requirement)
+aoi_spat <- as.owin(st_geometry(aoi_fixed))
+
+# sample with min dist = 1000 m
+bg_insects_ppp <- rSSI(r = 1000, n = 10000, win = aoi_spat)
+bg_plants_ppp  <- rSSI(r = 1000, n = 10000, win = aoi_spat)
+
+# convert  to sf
+bg_insects_sf <- st_as_sf(as.data.frame(bg_insects_ppp), coords = c("x", "y"), 
+                  crs = st_crs(aoi_land))
+bg_plant_sf <- st_as_sf(as.data.frame(bg_plants_ppp), coords = c("x", "y"), 
+                          crs = st_crs(aoi_land))
+
+
+# add presence to existing insect and plant occurrence data
+insect_pres <- insect_data %>%
+  mutate(present = 1,
+         source = "presence")
+
+plant_pres <- plant_data %>%
+  mutate(present = 1,
+         source = "presence")
+
+# Add metadata to background points
+bg_insects_sf <- bg_insects_sf %>%
+  mutate(present = 0,
+         source = "background",
+         name = paste0("bg_insect_", row_number()))
+
+bg_plants_sf <- bg_plant_sf %>%
+  mutate(present = 0,
+         source = "background",
+         name = paste0("bg_plant_", row_number()))
+
+# Combine presences and background for each group
+insect_pb <- bind_rows(insect_pres, bg_insects_sf)
+plant_pb  <- bind_rows(plant_pres,  bg_plants_sf)
+
+# cast to point
+insect_pb <- insect_pb %>%
+  st_cast("POINT") %>%
+  st_sf()  # ensure geometry column is pure POINT
+
+plant_pb <- plant_pb %>%
+  st_cast("POINT") %>%
+  st_sf()
+
+
+
+# handle annoying edge issues
+pred_complete <- app(pred, fun = function(x) all(!is.na(x)))
+pred_masked <- mask(pred, pred_complete)
+
+# extract
+insect_vals <- extract(pred_masked, vect(insect_pb))
+plant_vals <- extract(pred_masked, vect(plant_pb))
+
+# join
+insect_pb_pred <- bind_cols(insect_pb, insect_vals[,-1])
+insect_pb_pred <- insect_pb_pred %>%
+  mutate(presence = ifelse(source == "presence", 1, 0))
+
+plant_pb_pred <- bind_cols(plant_pb, plant_vals[,-1])
+plant_pb_pred <- plant_pb_pred %>%
+  mutate(presence = ifelse(source == "presence", 1, 0))
+
+
+# check completeness
+sum(is.na(insect_pb_pred)) # missing 21 values
+sum(is.na(plant_pb_pred)) # missing 13 values
+
+
 # Write df to file --------------------------------------------------------
 
 # join back response variables
@@ -218,6 +310,11 @@ plant_df <- cbind(plant_full %>% select(species_richness),
 write.csv(insect_df, "data/insect_model_df.csv", row.names = FALSE)
 write.csv(plant_df, "data/plant_model_df.csv", row.names = FALSE)
 
+write.csv(st_drop_geometry(insect_pb_pred), "data/insect_maxent_data.csv", 
+          row.names = FALSE)
+write.csv(st_drop_geometry(plant_pb_pred),  "data/plant_maxent_data.csv",  
+          row.names = FALSE)
+
 
 # Write sf to vector ------------------------------------------------------
 
@@ -229,3 +326,6 @@ plant_sf <- cbind(plant_full %>% select(species_richness),
 
 st_write(insect_sf, "vector/insect_model_sf.geojson")
 st_write(plant_sf, "vector/plant_model_sf.geojson")
+
+st_write(insect_pb_pred, "vector/insect_maxent_data.geojson")
+st_write(plant_pb_pred,  "vector/plant_maxent_data.geojson")

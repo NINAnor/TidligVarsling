@@ -1,6 +1,7 @@
 # Script to get spatial data for insect groups
 # Jenny Hansen
 # 01 July 2024
+# updated 08 October 2025 to include new survey data
 
 # working in TidligVarsling project
 
@@ -18,6 +19,9 @@ library(mapview)
 # data came from Marie Davey (email from 08 May 2024)
 insect_data <- 
   read.delim("data/tidlig_varsling_longform_combined_data_all_years_08052024.txt")
+
+# new data from Marie Davey (email 08 Oct 2025)
+insect_data <- read.delim("data/tidlig_varsling_longform_combined_data_species_2018to2024_06102025.txt")
 
 select_insect <- insect_data %>% 
   select(year, sample_id, sampling_name, sampling_number, UTM_east, UTM_north, 
@@ -84,22 +88,29 @@ generate_spatial_data <- function(data, group_filter, group_name) {
   return(group_sf)
 }
 
+
 # apply function to each group
 fremmede_sf <- generate_spatial_data(insect_named, "fremmede", 
                                      "fremmede")
 
 mapview(fremmede_sf, cex = "mean_unique_species", zcol = "mean_unique_species")
 
-potensielt_nye_sf <- generate_spatial_data(insect_named, c("potensiell_fremmede", 
+
+# NB! the value names have changed in the most recent data (per Marie & Jostein)
+# Potential_invasive=
+# potensiell_fremmede+potensiell_fremmede_with_norsk_GBIF_occurrences+not_in_GBIF
+
+potensielt_nye_sf <- generate_spatial_data(insect_named, c("potensiell_fremmede",
+                                                           "potensiell_fremmede_with_norsk_GBIF_occurrences",
+                                                           "not_in_GBIF",
                                                            "d\xf8rstokkart"), 
                                            "pot_nye_fremmede")
-potensielt_nye_sf <- potensielt_nye_sf %>% 
-  rename(mean_unique_species = total_abd)
 mapview(potensielt_nye_sf, cex = "mean_unique_species", 
         zcol = "mean_unique_species")
 
 
-overlooked_sf <- generate_spatial_data(insect_named, "overlooked", 
+overlooked_sf <- generate_spatial_data(insect_named, c("overlooked_with_fennoscandic_GBIF_occurrences",
+                                                       "overlooked_with_norsk_GBIF_occurrences"), 
                                        "overlooked")
 mapview(overlooked_sf, cex = "mean_unique_species", 
         zcol = "mean_unique_species")
