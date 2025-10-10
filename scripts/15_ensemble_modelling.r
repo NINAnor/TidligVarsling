@@ -3,6 +3,9 @@
 # Jenny Hansen
 # 29 September 2025
 # updated 02 October 2025 to try with 1000 bg pts
+# updated 08 October 2025 with new data & adding MaxEnt
+
+# NB! This script takes 3+ hours to run
 
 # working in TidligVarsling project
 
