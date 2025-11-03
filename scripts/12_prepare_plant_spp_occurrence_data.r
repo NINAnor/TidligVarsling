@@ -3,6 +3,8 @@
 # 26 September 2025
 
 # working in TidligVarsling project
+setwd("~/Mounts/R/Prosjekter/15821000_tidlig_oppdagelse_og_varsling_av_fremmede_arter/Jenny/TidligVarsling")
+
 
 # Load required libraries -------------------------------------------------
 
@@ -17,27 +19,41 @@ library(mapview)
 ssb <- st_read("vector/ssb250_studyarea.shp")
 
 # grid data for joining to plant data
-samp_grid <- st_read("vector/cleaned_grid.geojson") %>% 
-  select(name) %>% 
-  group_by(name) %>% 
-  slice(1) %>% 
-  ungroup()
+samp_grid <- st_read("/data/R/Prosjekter/15821000_tidlig_oppdagelse_og_varsling_av_fremmede_arter/Ida/Data/GIS/cleaned_grid_18_25.geojson")
 
 # plant data from Ida
-plants <- read_excel("/data/R/Prosjekter/15821000_tidlig_oppdagelse_og_varsling_av_fremmede_arter/Ida/Data/Fielddata/Processed/Tidvars_planter_2018-2023_traits.xlsx") %>%
-  rename(lokname = "locality_v3") %>%
-  filter(year != 2018,
-         !Fremmedartsstatus %in% c("Etablert per år 1800", "Ikke fremmed"),
-         Tvilsom != 1,
-         Potensiell_ny_art == 1) 
+plants <- read_excel("/data/R/Prosjekter/15821000_tidlig_oppdagelse_og_varsling_av_fremmede_arter/Ida/Data/Training_data/tidvars_18_25_plant_training.xlsx") %>%
+  rename(lokname = "locality_v3")
 
 
 # Make plants spatial -----------------------------------------------------
 
-plants_sf <- plants %>%
+plants_sf_field <- plants %>%
+  filter(coltype == "field") %>%
   left_join(samp_grid %>% st_drop_geometry(), by = c("lokname" = "name")) %>%
   left_join(samp_grid %>% select(name, geometry),  by = c("lokname" = "name")) %>%
   st_as_sf()
+
+plants_sf_artskart <- plants %>%
+  filter(coltype == "artskart") %>%
+  st_as_sf(coords=c("decimalLongitude","decimalLatitude"), crs = 25833) 
+
+plants_sf_artskart <- ssb %>%
+  st_join(plants_sf_artskart, join = st_intersects) %>%
+  filter(!is.na(species)) %>%
+  select(species, year, lokname, coltype, SSBID)
+
+plants_sf <- plants_sf_field %>%
+  bind_rows(plants_sf_artskart) %>%
+  # Fill lokname in Artskart too if geometry is the same
+  group_by(geometry) %>%
+  fill(lokname, .direction = "downup") %>%
+  ungroup() %>%
+  # Add SSB id to lokname for the ones that have NA
+  mutate(lokname=ifelse(is.na(lokname),
+                        SSBID,
+                        lokname)) %>%
+  select(-SSBID)
 
 
 # Get richness per sampling location --------------------------------------
@@ -58,4 +74,4 @@ plants_richness <- plants_sf %>%
 mapview(plants_richness, zcol = "species_richness")
 
 # export richness data
-st_write(plants_richness, "vector/plant_spp_presence_data.geojson")
+st_write(plants_richness, "/data/R/Prosjekter/15821000_tidlig_oppdagelse_og_varsling_av_fremmede_arter/Ida/Data/Training_data/plant_spp_presence_data.geojson")
