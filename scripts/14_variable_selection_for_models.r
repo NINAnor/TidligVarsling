@@ -6,6 +6,8 @@
 
 # working in TidligVarsling project
 
+setwd("~/Mounts/R/Prosjekter/15821000_tidlig_oppdagelse_og_varsling_av_fremmede_arter/")
+
 # Load required libraries -------------------------------------------------
 
 library(tidyverse)
@@ -14,8 +16,8 @@ library(randomForestSRC)
 # Import data -------------------------------------------------------------
 
 # data prepared in script 13
-insect_df <- read.csv("data/insect_model_df.csv") 
-plant_df  <- read.csv("data/plant_model_df.csv") 
+insect_df <- read.csv("Ida/Data/Model/insect_model_df.csv") 
+plant_df  <- read.csv("Ida/Data/Model/plant_model_df.csv") 
 
 
 # Identify correlated vars ------------------------------------------------
@@ -66,14 +68,16 @@ joint_rf_importance <- function(plant_df, insect_df,
   
   # join datasets
   # need to 'pad out' plants with NA to match nrow for insects
-  plant_vec <- rep(NA_real_, nrow(insect_df))
-  plant_vec[seq_len(nrow(plant_df))] <- plant_df$species_richness
   
-  joint_df <- insect_df %>%
+  
+  insect_vec <- rep(NA_real_, nrow(plant_df))
+  insect_vec[seq_len(nrow(insect_df))] <- insect_df$species_richness
+  
+  joint_df <- plant_df %>%
     select(-species_richness) %>%
     mutate(
-      insect = insect_df$species_richness,
-      plant  = plant_vec
+      plant = plant_df$species_richness,
+      insect  = insect_vec
     )
   
   
@@ -208,6 +212,8 @@ final_table_ranked %>% print(n = 10)
 
 # all vars, ranked
 final_table_ranked %>% print(n = 18)
+
+final_table_ranked %>% write_xlsx("Ida/Data/Model/final_table_ranked.xlsx")
 
 
 # Thoughts on selection ---------------------------------------------------
