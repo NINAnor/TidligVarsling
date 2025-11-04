@@ -30,43 +30,50 @@ library(viridis)
 
 # variables were selected in script 14
 # NB: these changed after filtering plants and re-doing the joint RF
-keep_vars <- c("species_richness",
-               "neighbor_prct_impervious", "ndvi_stdDev", 
-               "distance_to_lumberyard","distance_to_private_road", 
-               "ndwi_median", "distance_to_industrial_area", "enebolig_density",
-               "ndvi_summer", "distance_to_avfall", "percentage_forest",
-               "coldest_winter_temperature", "neighbor_prct_open")
+
+final_table_ranked <- read_excel("Ida/Data/Model/final_table_ranked.xlsx")
+
+#Ida: decide to keep the 10 first variables as these have a plant importance
+# larger than 0.05 (random threshold from my side)
+keep_vars <- final_table_ranked$Variable[final_table_ranked$Rank %in% 1:10]
+
+#keep_vars <- c("species_richness",
+#               "neighbor_prct_impervious", "ndvi_stdDev", 
+#               "distance_to_lumberyard","distance_to_private_road", 
+#               "ndwi_median", "distance_to_industrial_area", "enebolig_density",
+#               "ndvi_summer",  "percentage_forest",
+#               "coldest_winter_temperature", "neighbor_prct_open")
 
 # GAM, BRT, and RF data
-insect_sf <- st_read("vector/insect_model_sf.geojson")  %>% 
-  select(all_of(keep_vars)) %>% 
+insect_sf <- st_read("Ida/Data/Model/insect_model_sf.geojson")  %>% 
+  select(all_of(c("species_richness",keep_vars))) %>% 
   mutate(group = "insect",
          present = as.integer(species_richness > 0))
-plant_sf  <- st_read("vector/plant_model_sf.geojson") %>% 
-  select(all_of(keep_vars))  %>% 
+plant_sf  <- st_read("Ida/Data/Model/plant_model_sf.geojson") %>% 
+  select(all_of(c("species_richness",keep_vars))) %>% 
   mutate(group = "plant",
          present = as.integer(species_richness > 0))
 
 # maxent data
-insect_me <- st_read("vector/insect_maxent_data.geojson")
-plant_me <- st_read("vector/plant_maxent_data.geojson")
+insect_me <- st_read("Ida/Data/Model/insect_maxent_data.geojson")
+plant_me <- st_read("Ida/Data/Model/plant_maxent_data.geojson")
 
 insect_me_df <- insect_me %>%
   st_drop_geometry() %>%
-  select(presence, all_of(keep_vars[2:13])) %>%
-  mutate(across(all_of(keep_vars[2:13]), as.numeric))  %>% 
+  select(presence, all_of(keep_vars)) %>%
+  mutate(across(all_of(keep_vars), as.numeric))  %>% 
   tidyr::drop_na()
 
 plant_me_df <- plant_me %>%
   st_drop_geometry() %>%
-  select(presence, all_of(keep_vars[2:13])) %>%
-  mutate(across(all_of(keep_vars[2:13]), as.numeric)) %>% 
+  select(presence, all_of(keep_vars)) %>%
+  mutate(across(all_of(keep_vars), as.numeric)) %>% 
   tidyr::drop_na()
 
 
 # predictors from script 10
-pred <- rast("raster/complete_prediction_stack.tif")
-pred <- pred[[keep_vars[2:13]]]
+pred <- rast("Jenny/TidligVarsling/raster/complete_prediction_stack.tif")
+pred <- pred[[keep_vars]]
 
 rm(keep_vars)
 
@@ -105,7 +112,7 @@ folds_plants <- cv_spatial(x = plant_sf, "present", k = 5, size = block_p,
 
 # set up data
 preds_insects <- names(insect_sf %>% 
-                         select(neighbor_prct_impervious:neighbor_prct_open) %>% 
+                         select(keep_vars) %>% 
                          st_drop_geometry())
 dat_insects <- insect_sf %>% st_drop_geometry()
 dat_insects$present <- as.integer(dat_insects$species_richness > 0)
@@ -1016,16 +1023,16 @@ mu_insects_rf <- terra::predict(
 
 # mask to study area
 prob_insects_rf <- terra::mask(prob_insects_rf, expected_insects)
-writeRaster(prob_insects_rf, "raster/insect_prob_rf.tif")
+writeRaster(prob_insects_rf, "Ida/Resultat/Model outputs/insect_prob_rf.tif")
 mu_insects_rf   <- terra::mask(mu_insects_rf, expected_insects)
-writeRaster(mu_insects_rf, "raster/insect_rich_rf.tif")
+writeRaster(mu_insects_rf, "Ida/Resultat/Model outputs/insect_rich_rf.tif")
 
 # combine for expected richness
 expected_insects_rf <- prob_insects_rf * mu_insects_rf
 plot(expected_insects_rf)
 
 # write out because this takes forever
-writeRaster(expected_insects_rf, "raster/insect_pred_rich_rf.tif")
+writeRaster(expected_insects_rf, "Ida/Resultat/Model outputs/insect_pred_rich_rf.tif")
 
 # plants
 
@@ -1063,16 +1070,16 @@ mu_plants_rf <- terra::predict(
 
 # mask to study area
 prob_plants_rf <- terra::mask(prob_plants_rf, expected_plants)
-writeRaster(prob_plants_rf, "raster/plant_prob_rf.tif")
+writeRaster(prob_plants_rf, "Ida/Resultat/Model outputs/plant_prob_rf.tif")
 mu_plants_rf   <- terra::mask(mu_plants_rf, expected_plants)
-writeRaster(mu_plants_rf, "raster/plant_rich_rf.tif")
+writeRaster(mu_plants_rf, "Ida/Resultat/Model outputs/plant_rich_rf.tif")
 
 # combine for expected richness
 expected_plants_rf <- prob_plants_rf * mu_plants_rf
 plot(expected_plants_rf)
 
 # write out because this takes forever
-writeRaster(expected_plants_rf, "raster/plant_pred_rich_rf.tif")
+writeRaster(expected_plants_rf, "Ida/Resultat/Model outputs/plant_pred_rich_rf.tif")
 
 # Fit final MaxEnt --------------------------------------------------------
 
@@ -1347,7 +1354,7 @@ mu_insects_ens <- terra::clamp(mu_insects_ens, lower = 0, upper = Inf)
 expected_insects_ens <- prob_insects_ens * mu_insects_ens
 expected_insects_ens <- terra::mask(expected_insects_ens, expected_insects)
 plot(expected_insects_ens)
-writeRaster(expected_insects_ens, "raster/ensemble_prediction_insects.tif")
+writeRaster(expected_insects_ens, "Ida/Resultat/Model outputs/ensemble_prediction_insects.tif")
 
 # plants
 prob_plants_ens <- prob_plants * w_occ_plants["GAM"] +
@@ -1363,7 +1370,7 @@ mu_plants_ens <- terra::clamp(mu_plants_ens, lower = 0, upper = Inf)
 expected_plants_ens <- prob_plants_ens * mu_plants_ens
 expected_plants_ens <- terra::mask(expected_plants_ens, expected_plants)
 plot(expected_plants_ens)
-writeRaster(expected_plants_ens, "raster/ensemble_prediction_plants.tif")
+writeRaster(expected_plants_ens, "Ida/Resultat/Model outputs/ensemble_prediction_plants.tif")
 
 # Comparison table --------------------------------------------------------
 
@@ -1446,24 +1453,24 @@ ggplot(summary_long, aes(x = Metric, y = Value,
 # save individual models 
 
 # insects
-saveRDS(gam_bin_insects, "models/gam_bin_insects.rds")
-saveRDS(gam_mu_insects,  "models/gam_mu_insects.rds")
-saveRDS(brt_bin_insects, "models/brt_bin_insects.rds")
-saveRDS(brt_mu_insects,  "models/brt_mu_insects.rds")
-saveRDS(rf_bin_insects,  "models/rf_bin_insects.rds")
-saveRDS(rf_mu_insects,   "models/rf_mu_insects.rds")
-saveRDS(ens_mu_insects,  "models/ens_mu_insects.rds")
-saveRDS(final_maxent_insects, "models/maxent_insects.rds")  
+saveRDS(gam_bin_insects, "Ida/Data/Model/gam_bin_insects.rds")
+saveRDS(gam_mu_insects,  "Ida/Data/Model/gam_mu_insects.rds")
+saveRDS(brt_bin_insects, "Ida/Data/Model/brt_bin_insects.rds")
+saveRDS(brt_mu_insects,  "Ida/Data/Model/brt_mu_insects.rds")
+saveRDS(rf_bin_insects,  "Ida/Data/Model/rf_bin_insects.rds")
+saveRDS(rf_mu_insects,   "Ida/Data/Model/rf_mu_insects.rds")
+saveRDS(ens_mu_insects,  "Ida/Data/Model/ens_mu_insects.rds")
+saveRDS(final_maxent_insects, "Ida/Data/Model/maxent_insects.rds")  
 
 # plants
-saveRDS(gam_bin_plants, "models/gam_bin_plants.rds")
-saveRDS(gam_mu_plants,  "models/gam_mu_plants.rds")
-saveRDS(brt_bin_plants, "models/brt_bin_plants.rds")
-saveRDS(brt_mu_plants,  "models/brt_mu_plants.rds")
-saveRDS(rf_bin_plants,  "models/rf_bin_plants.rds")
-saveRDS(rf_mu_plants,   "models/rf_mu_plants.rds")
-saveRDS(ens_mu_plants,  "models/ens_mu_plants.rds")
-saveRDS(final_maxent_plants, "models/maxent_plants.rds")    
+saveRDS(gam_bin_plants, "Ida/Data/Model/gam_bin_plants.rds")
+saveRDS(gam_mu_plants,  "Ida/Data/Model/gam_mu_plants.rds")
+saveRDS(brt_bin_plants, "Ida/Data/Model/brt_bin_plants.rds")
+saveRDS(brt_mu_plants,  "Ida/Data/Model/brt_mu_plants.rds")
+saveRDS(rf_bin_plants,  "Ida/Data/Model/rf_bin_plants.rds")
+saveRDS(rf_mu_plants,   "Ida/Data/Model/rf_mu_plants.rds")
+saveRDS(ens_mu_plants,  "Ida/Data/Model/ens_mu_plants.rds")
+saveRDS(final_maxent_plants, "Ida/Data/Model/maxent_plants.rds")    
 
 # all models in one list 
 
@@ -1484,28 +1491,28 @@ all_models <- list(
   )
 )
 
-saveRDS(all_models, "models/all_models.rds")
+saveRDS(all_models, "Ida/Data/Model/all_models.rds")
 
 
 
 # Models with 1000 bg pts -------------------------------------------------
 
 # individual models
-saveRDS(gam_bin_insects, "models/gam_bin_insects_1000.rds")
-saveRDS(gam_mu_insects,  "models/gam_mu_insects_1000.rds")
-saveRDS(brt_bin_insects, "models/brt_bin_insects_1000.rds")
-saveRDS(brt_mu_insects,  "models/brt_mu_insects_1000.rds")
-saveRDS(rf_bin_insects,  "models/rf_bin_insects_1000.rds")
-saveRDS(rf_mu_insects,   "models/rf_mu_insects_1000.rds")
-saveRDS(ens_mu_insects,  "models/ens_mu_insects_1000.rds")
+saveRDS(gam_bin_insects, "Ida/Data/Model/gam_bin_insects_1000.rds")
+saveRDS(gam_mu_insects,  "Ida/Data/Model/gam_mu_insects_1000.rds")
+saveRDS(brt_bin_insects, "Ida/Data/Model/brt_bin_insects_1000.rds")
+saveRDS(brt_mu_insects,  "Ida/Data/Model/brt_mu_insects_1000.rds")
+saveRDS(rf_bin_insects,  "Ida/Data/Model/rf_bin_insects_1000.rds")
+saveRDS(rf_mu_insects,   "Ida/Data/Model/rf_mu_insects_1000.rds")
+saveRDS(ens_mu_insects,  "Ida/Data/Model/ens_mu_insects_1000.rds")
 
-saveRDS(gam_bin_plants, "models/gam_bin_plants_1000.rds")
-saveRDS(gam_mu_plants,  "models/gam_mu_plants_1000.rds")
-saveRDS(brt_bin_plants, "models/brt_bin_plants_1000.rds")
-saveRDS(brt_mu_plants,  "models/brt_mu_plants_1000.rds")
-saveRDS(rf_bin_plants,  "models/rf_bin_plants_1000.rds")
-saveRDS(rf_mu_plants,   "models/rf_mu_plants_1000.rds")
-saveRDS(ens_mu_plants,  "models/ens_mu_plants_1000.rds")
+saveRDS(gam_bin_plants, "Ida/Data/Model/gam_bin_plants_1000.rds")
+saveRDS(gam_mu_plants,  "Ida/Data/Model/gam_mu_plants_1000.rds")
+saveRDS(brt_bin_plants, "Ida/Data/Model/brt_bin_plants_1000.rds")
+saveRDS(brt_mu_plants,  "Ida/Data/Model/brt_mu_plants_1000.rds")
+saveRDS(rf_bin_plants,  "Ida/Data/Model/rf_bin_plants_1000.rds")
+saveRDS(rf_mu_plants,   "Ida/Data/Model/rf_mu_plants_1000.rds")
+saveRDS(ens_mu_plants,  "Ida/Data/Model/ens_mu_plants_1000.rds")
 
 
 # all in a list
@@ -1524,4 +1531,4 @@ all_models <- list(
   )
 )
 
-saveRDS(all_models, "models/all_models_1000.rds")
+saveRDS(all_models, "Ida/Data/Model/all_models_1000.rds")

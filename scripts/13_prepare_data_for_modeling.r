@@ -5,6 +5,9 @@
 
 # working in TidligVarsling project
 
+
+setwd("~/Mounts/R/Prosjekter/15821000_tidlig_oppdagelse_og_varsling_av_fremmede_arter/")
+
 # Load required libraries -------------------------------------------------
 
 library(dplyr)
@@ -17,10 +20,10 @@ library(spatstat.random)
 # Import data -------------------------------------------------------------
 
 # insect spp presence data, created in script 11
-insect_data <- st_read("vector/insect_spp_presence_data_tv_only.geojson")
+insect_data <- st_read("Jenny/TidligVarsling/vector/insect_spp_presence_data_tv_only.geojson")
 
 # plant spp presence data, created in script 12
-plant_data <- st_read("vector/plant_spp_presence_data.geojson") %>% 
+plant_data <- st_read("Ida/Data/Training_data/plant_spp_presence_data.geojson") %>% 
   rename(name = lokname)
 
 # predictor rasters, created in script 10
@@ -70,7 +73,7 @@ plant_data <- plant_data %>%
 
 # Create exclusion zone ---------------------------------------------------
 
-aoi_land <- st_read("vector/bg_sampling_area.geojson")
+aoi_land <- st_read("Jenny/TidligVarsling/vector/bg_sampling_area.geojson")
 
 # this is to prevent randomly-sampled pseudoabsences from being
 # drawn near presence locations
@@ -280,8 +283,8 @@ pred_complete <- app(pred, fun = function(x) all(!is.na(x)))
 pred_masked <- mask(pred, pred_complete)
 
 # extract
-insect_vals <- extract(pred_masked, vect(insect_pb))
-plant_vals <- extract(pred_masked, vect(plant_pb))
+insect_vals <- terra::extract(pred_masked, vect(insect_pb))
+plant_vals <- terra::extract(pred_masked, vect(plant_pb))
 
 # join
 insect_pb_pred <- bind_cols(insect_pb, insect_vals[,-1])
@@ -307,12 +310,12 @@ insect_df <- cbind(insect_full %>% select(species_richness),
 plant_df <- cbind(plant_full %>% select(species_richness),
                   plant_vars) %>% st_drop_geometry()
 
-write.csv(insect_df, "data/insect_model_df.csv", row.names = FALSE)
-write.csv(plant_df, "data/plant_model_df.csv", row.names = FALSE)
+write.csv(insect_df, "Ida/Data/insect_model_df.csv", row.names = FALSE)
+write.csv(plant_df, "Ida/Data/plant_model_df.csv", row.names = FALSE)
 
-write.csv(st_drop_geometry(insect_pb_pred), "data/insect_maxent_data.csv", 
+write.csv(st_drop_geometry(insect_pb_pred), "Ida/Data/Model/insect_maxent_data.csv", 
           row.names = FALSE)
-write.csv(st_drop_geometry(plant_pb_pred),  "data/plant_maxent_data.csv",  
+write.csv(st_drop_geometry(plant_pb_pred),  "Ida/Data/Model/plant_maxent_data.csv",  
           row.names = FALSE)
 
 
@@ -324,8 +327,8 @@ insect_sf <- cbind(insect_full %>% select(species_richness),
 plant_sf <- cbind(plant_full %>% select(species_richness),
                   plant_vars)
 
-st_write(insect_sf, "vector/insect_model_sf.geojson")
-st_write(plant_sf, "vector/plant_model_sf.geojson")
+st_write(insect_sf, "Ida/Data/Model/insect_model_sf.geojson")
+st_write(plant_sf, "Ida/Data/Model/plant_model_sf.geojson")
 
-st_write(insect_pb_pred, "vector/insect_maxent_data.geojson")
-st_write(plant_pb_pred,  "vector/plant_maxent_data.geojson")
+st_write(insect_pb_pred, "Ida/Data/Model/insect_maxent_data.geojson")
+st_write(plant_pb_pred,  "Ida/Data/Model/plant_maxent_data.geojson")
