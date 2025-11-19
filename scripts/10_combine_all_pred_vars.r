@@ -32,11 +32,11 @@ names(enebolig_density) <- "enebolig_density"
 # from script 08:
 avfall <- rast("raster/distance_to_avfall.tif")
 
-# from script 09b:
+# from script 09:
 edge_density <- rast("raster/forest_edge_density.tif")
 
 
-# from Andrew (can be used if desired):
+# provided by Andrew:
 ndvi_sd <- rast("raster/NDVIstdev.tif")
 ndvi_max <- rast("raster/NDVImax.tif")
 ndwi_median <- rast("raster/NDWImedian.tif")
@@ -69,7 +69,7 @@ rasters <- lapply(rasters, \(r) { crs(r) <- epsg25833; r })
 # this straggler!
 crs(prct_industrial) <- "EPSG:25833"
 
-# double check!
+# double check
 for (nm in names(rasters)) {
   crs(rasters[[nm]]) <- "EPSG:25833"
 }
@@ -77,10 +77,10 @@ for (nm in names(rasters)) {
 all_rasters <- do.call(c, rasters)
 
 # additional NA handling
-
-template <- rast_stack[[1]]   # first layer, 250m resolution
+template <- rast_stack[[1]]   
 landmask <- !is.na(template)
 
+# vectors to check for alignment
 density_layers   <- c("edge_density", "enebolig_density")
 distance_layers  <- c("distance_to_public_road", "distance_to_private_road",
                       "distance_to_railway", "distance_to_housing",
@@ -109,7 +109,7 @@ all_cleaned <- lapply(names(all_rasters), function(nm) {
   clean_layer(all_rasters[[nm]], nm, template, landmask)
 })
 all_rasters <- rast(all_cleaned)
-
+names(all_rasters)
 
 # export stack
 writeRaster(all_rasters, "raster/complete_prediction_stack.tif",
