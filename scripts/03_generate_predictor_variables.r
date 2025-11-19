@@ -1,6 +1,6 @@
 # script to generate predictor variables for ensemble models
 # Jenny Hansen
-# 15 Sept. 2025
+# 15 September 2025
 
 # working in TidligVarsling project
 

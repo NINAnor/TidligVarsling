@@ -1,4 +1,4 @@
-# Script to import 1000 m SSB rutenett and assign sampling grids to 1 km square
+# Script to import 250 m SSB rutenett and assign sampling grids to ruter
 # Jenny Hansen
 # 20 August 2024
 
@@ -27,7 +27,7 @@ samp_grid <- st_read("vector/cleaned_grid.geojson") %>%
 samp_grid_cents <- samp_grid %>% 
   st_centroid()
 
-# study are based on 250 m rutenett from SSB (from Ida)
+# study are based on 250 m rutenett from SSB (provided by Ida)
 rutenett_250 <- st_read("vector/ssb250_studyarea.shp") 
 
 # Assign sampling grid to 250 m rutenett ----------------------------------

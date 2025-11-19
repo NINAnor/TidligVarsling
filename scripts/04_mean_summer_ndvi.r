@@ -28,7 +28,7 @@ template_rast <- rast("raster/sa_grid_250m_fixed.tif")
 # NDVI was created in the following GEE script:
 # https://code.earthengine.google.com/093e3a97ed46dbbdc5f69f099321ebe0
 ndvi_rast <- rast("raster/ndvi_summer.tif")
-ndvi_rast <- project(ndvi_rast, template_rast, method="bilinear")
+ndvi_rast <- project(ndvi_rast, template_rast, method = "bilinear")
 
 # Align with GRASS rasters ------------------------------------------------
 

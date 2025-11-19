@@ -5,7 +5,6 @@
 
 # working in TidligVarsling project
 
-
 # Load required libraries -------------------------------------------------
 
 library(terra)
@@ -42,7 +41,7 @@ rasters_tn <- lapply(files, function(f) {
 
 # Get coldest temps in the winter months ----------------------------------
 
-# Function: extract coldest daily minimum 
+# function to extract coldest daily minimum 
 get_winter_min <- function(r) {
 
   dts <- terra::time(r)

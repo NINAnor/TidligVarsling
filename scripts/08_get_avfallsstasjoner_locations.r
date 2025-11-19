@@ -7,7 +7,6 @@
 
 Sys.setlocale("LC_CTYPE", "nb_NO.UTF-8")
 
-
 # Load required libraries -------------------------------------------------
 
 library(dplyr)
@@ -115,7 +114,6 @@ for (i in seq_len(nrow(ostlandet_centers))) {
 
 
 # combine & remove duplicates
-
 places_df_all <- do.call(rbind, results_list)
 
 places_df_unique <- places_df_all %>%
@@ -124,21 +122,21 @@ places_df_unique <- places_df_all %>%
   slice_max(order_by = place_id, n = 1, with_ties = FALSE) %>%
   ungroup()
 
-places_sf <- st_as_sf(places_df_unique, coords = c("lng", "lat"), crs = 4326)
+places_sf <- st_as_sf(places_df_unique, coords = c("lng", "lat"), 
+                      crs = 4326)
 
 places_sf <- places_sf %>%
   mutate(
-    across(where(is.character), ~ iconv(.x, from = "", to = "UTF-8", sub = ""))
+    across(where(is.character), ~ iconv(.x, from = "", to = "UTF-8", 
+                                        sub = ""))
   )
 
 mapview(places_sf)
 
 
-
 # Remove bad matches ------------------------------------------------------
 
 # based on the names in the places_sf df
-
 keep_patterns <- c(
   "gjenvinn",       # gjenvinning, gjenvinningsstasjon
   "gjenbruks?",     # gjenbruk, gjenbruksstasjon
@@ -171,7 +169,6 @@ places_filtered <- places_sf %>%
 
 mapview(places_filtered)
 
-
 # Combine with Ida's data -------------------------------------------------
 
 osm_pts <- st_centroid(osm_locs)
@@ -186,7 +183,6 @@ places_pts <- places_filtered %>%
 
 # combine
 all_locs <- rbind(osm_pts, places_pts)
-
 
 # remove duplicates
 all_locs <- all_locs %>% 

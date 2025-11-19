@@ -77,7 +77,7 @@ occ_select_cleaned <- occ %>%
          coord_precision = coordinateUncertaintyInMeters, eventDate,
          basisOfRecord, institutionCode, catalogNumber, identifiedBy) %>%
   mutate(parsed_date = as.Date(eventDate, format = "%Y-%m-%d"),
-         species_clean = word(species, 1, 2),  # keep only genus + species
+         species_clean = word(species, 1, 2),  
          species_clean = str_trim(species_clean)) %>% 
   filter(!is.na(parsed_date),  
          occurrenceStatus != "ABSENT") %>%
@@ -124,9 +124,9 @@ nim_sf2 <- nim_sf %>%
     institutionCode = as.character(institutionCode),
     catalogNumber   = as.character(catalogNumber),
     identifiedBy    = as.character(identifiedBy),
-    species_clean   = species  # create to match occ_sf
+    species_clean   = species  
   ) %>%
-  select(names(occ_sf))  # reorder/align columns
+  select(names(occ_sf))  
 
 all_sf <- rbind(occ_sf, nim_sf2)
 
@@ -146,7 +146,7 @@ mapview(occ_with_grid)
 # summarize spp. richness per overlapping grid
 richness <- occ_with_grid %>%
   st_drop_geometry() %>%
-  group_by(SSBID) %>%  # replace with your actual polygon ID column
+  group_by(SSBID) %>%  
   summarise(species_richness = n_distinct(species))
 
 grid_richness <- ssb %>%
@@ -160,7 +160,7 @@ pnf_with_id <- st_join(pnf, ssb["SSBID"], join = st_within)
 
 pnf_clean <- pnf_with_id %>%
   st_drop_geometry() %>%
-  select(SSBID, mean_unique_species)
+  select(SSBID, name, mean_unique_species)
 
 # combine and take highest value for the grid (if values differ)
 spp_combined <- grid_richness %>%

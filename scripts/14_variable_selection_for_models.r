@@ -1,21 +1,23 @@
 # script to select predictor variables for models
 # Jenny Hansen
 # 27 September 2025
-# updated 02 October 2025 to try with 1000 bg pts
 # updated 08 October 2025 to include new survey data
+# NB: after discussion, we decided to abandon variable
+# selection and use all predictors in the models
 
 # working in TidligVarsling project
 
 # Load required libraries -------------------------------------------------
 
 library(tidyverse)
-library(randomForestSRC)
+library(randomForest)
 
 # Import data -------------------------------------------------------------
 
 # data prepared in script 13
 insect_df <- read.csv("data/insect_model_df.csv") 
-plant_df  <- read.csv("data/plant_model_df.csv") 
+plant_df  <- read.csv("data/plant_model_df.csv") %>% 
+  select(-matches("^species_richness\\.1$"), -source)
 
 
 # Identify correlated vars ------------------------------------------------
@@ -26,6 +28,7 @@ select_uncorrelated_joint <- function(df, importance_df, cutoff = 0.7) {
   cor_mat <- cor(df, use = "pairwise.complete.obs")
   
   ranked_vars <- importance_df %>%
+    filter(Variable %in% colnames(cor_mat)) %>%       
     arrange(desc(Importance_joint)) %>%
     pull(Variable)
   
@@ -34,6 +37,7 @@ select_uncorrelated_joint <- function(df, importance_df, cutoff = 0.7) {
   cluster_id <- 1
   
   for (var in ranked_vars) {
+    if (!(var %in% colnames(cor_mat))) next
     if (var %in% excluded) next
     
     correlated <- names(which(abs(cor_mat[var, ]) >= cutoff))
@@ -54,107 +58,119 @@ select_uncorrelated_joint <- function(df, importance_df, cutoff = 0.7) {
 }
 
 
-# Joint RF models ---------------------------------------------------------
+# RF models ---------------------------------------------------------------
 
-# function to fit joint randomforest models
-joint_rf_importance <- function(plant_df, insect_df,
-                                       ntree = 5000,
-                                       replicates = 10,
-                                       nsplit = 5,
-                                       combine_fun = c("mean", "max")) {
-  combine_fun <- match.arg(combine_fun)
+# function to fit individual randomforest models
+rf_importance_single <- function(df, response, ntree = 500, replicates = 3) {
+  vars <- setdiff(names(df), response)
   
-  # join datasets
-  # need to 'pad out' plants with NA to match nrow for insects
-  plant_vec <- rep(NA_real_, nrow(insect_df))
-  plant_vec[seq_len(nrow(plant_df))] <- plant_df$species_richness
+  # drop rows with NA in predictors or response
+  df_clean <- df %>%
+    select(all_of(c(response, vars))) %>%
+    na.omit()
   
-  joint_df <- insect_df %>%
-    select(-species_richness) %>%
-    mutate(
-      insect = insect_df$species_richness,
-      plant  = plant_vec
+  message(glue::glue(" - {nrow(df) - nrow(df_clean)} rows removed due to missing values ({response})"))
+  
+  model_list <- list()
+  imp_list <- list()
+  
+  for (i in seq_len(replicates)) {
+    set.seed(i)
+    fit <- randomForest(
+      reformulate(vars, response),
+      data = df_clean,
+      importance = TRUE,
+      ntree = ntree
     )
-  
-  
-  # tune mtry and nodesize
-  message("Tuning mtry and nodesize...")
-  tune_res <- tune(
-    Multivar(plant, insect) ~ .,
-    data = joint_df,
-    ntreeTry = 10000
-  )
-  
-  opt_mtry     <- tune_res$optimal[["mtry"]]
-  opt_nodesize <- tune_res$optimal[["nodesize"]]
-  message(glue::glue("Optimal mtry = {opt_mtry}, nodesize = {opt_nodesize}"))
-  
-  # replicate forests
-  set.seed(123)
-  imp_list <- replicate(replicates, {
-    fit <- rfsrc(
-      Multivar(plant, insect) ~ .,
-      data = joint_df,
-      importance = "permute",
-      ntree = ntree,
-      mtry = opt_mtry,
-      nodesize = opt_nodesize,
-      nsplit = nsplit,
-      samptype = "swor" # try without replacement for stability
-    )
+    model_list[[i]] <- fit
     
-    tibble(
-      Variable = names(fit$regrOutput$plant$importance),
-      Plant    = fit$regrOutput$plant$importance,
-      Insect   = fit$regrOutput$insect$importance
+    imp_list[[i]] <- tibble(
+      Variable = vars,
+      Importance = importance(fit)[, 1]
     )
-  }, simplify = FALSE)
+  }
   
-  # aggregate importance across replicates
+  # average importance across replicates
   imp_stable <- bind_rows(imp_list, .id = "replicate") %>%
     group_by(Variable) %>%
-    summarise(
-      Importance_plant  = mean(Plant),
-      Importance_insect = mean(Insect),
-      .groups = "drop"
-    )
+    summarise(Importance = mean(Importance, na.rm = TRUE), .groups = "drop")
   
+  return(list(importance = imp_stable, models = model_list))
+}
+
+
+# function to combine importance from models
+rf_importance_joint <- function(plant_df, insect_df, ntree = 500, 
+                                replicates = 3) {
   
-  # normalize per group
-  imp_stable <- imp_stable %>%
+  message("Running plant random forest...")
+  plant_out <- rf_importance_single(plant_df, response = "species_richness",
+                                    ntree = ntree, replicates = replicates)
+  imp_plant <- plant_out$importance %>% rename(Importance_plant = Importance)
+  
+  message("Running insect random forest...")
+  insect_out <- rf_importance_single(insect_df, response = "species_richness",
+                                     ntree = ntree, replicates = replicates)
+  imp_insect <- insect_out$importance %>% rename(Importance_insect = Importance)
+  
+  # Combine & normalize importance
+  imp_joint <- full_join(imp_plant, imp_insect, by = "Variable") %>%
     mutate(
       Plant_norm  = Importance_plant  / max(Importance_plant, na.rm = TRUE),
       Insect_norm = Importance_insect / max(Importance_insect, na.rm = TRUE),
-      Importance_joint = (Plant_norm + Insect_norm) / 2, 
-      Importance_joint_max = pmax(Plant_norm, Insect_norm)
-    )
+      Importance_joint = (Plant_norm + Insect_norm) / 2,
+      Importance_joint_max = pmax(Plant_norm, Insect_norm, na.rm = TRUE)
+    ) %>%
+    arrange(desc(Importance_joint))
   
-  return(imp_stable %>% arrange(desc(Importance_joint)))
+  # return both importance & models
+  return(list(
+    importance = imp_joint,
+    plant_models = plant_out$models,
+    insect_models = insect_out$models,
+    imp_plant = imp_plant,
+    imp_insect = imp_insect
+  ))
 }
 
 
 # run the models
-imp_joint <- joint_rf_importance(
+rf_joint_out <- rf_importance_joint(
   plant_df, insect_df,
-  ntree = 10000,
-  replicates = 10
-) %>%
-  select(Variable,
-         Importance_plant,
-         Importance_insect,
-         Importance_joint,
-         Importance_joint_max) # Optimal mtry = 11, nodesize = 1
+  ntree = 1000,
+  replicates = 3
+)
+
+# extract importance
+imp_plant  <- rf_joint_out$imp_plant
+imp_insect <- rf_joint_out$imp_insect
+
+imp_joint <- full_join(imp_plant, imp_insect, by = "Variable") %>%
+  mutate(
+    Plant_z  = (Importance_plant  - mean(Importance_plant,  na.rm = TRUE)) / sd(Importance_plant,  na.rm = TRUE),
+    Insect_z = (Importance_insect - mean(Importance_insect, na.rm = TRUE)) / sd(Importance_insect, na.rm = TRUE),
+    Importance_joint = (Plant_z + Insect_z) / 2,
+    Importance_joint_max = pmax(Plant_z, Insect_z, na.rm = TRUE)
+  ) %>%
+  arrange(desc(Importance_joint))
+
+
+# individual models
+plant_models  <- rf_joint_out$plant_models
+insect_models <- rf_joint_out$insect_models
 
 imp_joint
 
-# importance values for plants have absolutely tanked when including
-# only potentially new invasives
 
 # model selection
 shared_selection_summary <- select_uncorrelated_joint(
-  df = plant_df %>% select(-species_richness),
+  df = plant_df %>%
+    sf::st_drop_geometry() %>%
+    select(where(is.numeric), -species_richness) %>%
+    select(all_of(intersect(names(.), imp_joint$Variable))),
   importance_df = imp_joint,
-  cutoff = 0.7) 
+  cutoff = 0.7
+)
 
 # Selection table ---------------------------------------------------------
 
@@ -207,19 +223,4 @@ ggplot(plot_data, aes(x = Rank, y = Importance, color = Group)) +
 final_table_ranked %>% print(n = 10)
 
 # all vars, ranked
-final_table_ranked %>% print(n = 18)
-
-
-# Thoughts on selection ---------------------------------------------------
-
-# original models had 14 variables- I personally like to follow the
-# 1 variable per n = 10, which would be 7
-# there are stronger signals for plants than insects, so I suggest using
-# the ranking for plants for variable selection
-# if we follow the variable importance curve for plants, it drops at 
-# distance to garden center
-# if we include all variables to that point, it will be 11
-
-# NB: this has changed dramatically after the plant filtering
-# suggest keeping percentage_roads (which is high importance for insects), 
-# even though that means upping the variables to 12
+final_table_ranked %>% print(n = 20)
