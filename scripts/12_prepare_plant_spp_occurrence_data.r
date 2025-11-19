@@ -1,10 +1,10 @@
 # Script to prepare plant data for modeling
 # Jenny Hansen
 # 26 September 2025
+# updated 03 November 2025 for additional plant data
 
 # working in TidligVarsling project
 setwd("~/Mounts/R/Prosjekter/15821000_tidlig_oppdagelse_og_varsling_av_fremmede_arter/Jenny/TidligVarsling")
-
 
 # Load required libraries -------------------------------------------------
 
@@ -12,6 +12,7 @@ library(dplyr)
 library(sf)
 library(readxl)
 library(mapview)
+library(tidyr)
 
 # Import data -------------------------------------------------------------
 
@@ -74,4 +75,5 @@ plants_richness <- plants_sf %>%
 mapview(plants_richness, zcol = "species_richness")
 
 # export richness data
-st_write(plants_richness, "/data/R/Prosjekter/15821000_tidlig_oppdagelse_og_varsling_av_fremmede_arter/Ida/Data/Training_data/plant_spp_presence_data.geojson")
+st_write(plants_richness, "vector/plant_spp_presence_data.geojson")
+#st_write(plants_richness, "/data/R/Prosjekter/15821000_tidlig_oppdagelse_og_varsling_av_fremmede_arter/Ida/Data/Training_data/plant_spp_presence_data.geojson")

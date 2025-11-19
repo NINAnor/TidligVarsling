@@ -1,8 +1,14 @@
-# Ignore everything
+# Ignore everything by default
 *
 
-# But not these files
-!*.R
+# Allow .gitignore itself
 !.gitignore
 
+# Allow directories so .r files inside them are visible
+!*/
 
+# Allow .r files (both .r and .R)
+!*.[rR]
+
+# Still ignore the UNUSED folder
+scripts/UNUSED/
