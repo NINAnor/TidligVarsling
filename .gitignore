@@ -12,3 +12,4 @@
 
 # Still ignore the UNUSED folder
 scripts/UNUSED/
+.Rproj.user

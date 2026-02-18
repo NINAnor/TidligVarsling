@@ -59,7 +59,7 @@ cv_range_points$range # 2326.377
 # using point data (plants)
 cv_range_points <- cv_spatial_autocor(x = plant_sf, column = "present", 
                                       plot = TRUE)
-cv_range_points$range # 17262.99
+cv_range_points$range # 24681.96
 
 # set block size
 block_i = 2327
@@ -1226,6 +1226,10 @@ summary_long <- summary_long %>%
       (max(Score, na.rm = TRUE) - min(Score, na.rm = TRUE))
   ) %>%
   ungroup()
+
+# RandomForest by far the best performing models for insects
+# Boosted Regression Trees performed best for plants, but
+# the ensemble model was close
 
 # plot showing performance
 ggplot(summary_long, aes(x = Metric, y = Value, 
