@@ -1,5 +1,6 @@
-# script to fit GAM and boosted regression tree models for plants and insects
-# test predictive ability and generate weights for ensemble models
+# script to fit GAM, boosted regression tree, and RandomForest models 
+# for plants and insects; test predictive ability and generate weights 
+# for ensemble models
 # Jenny Hansen
 # 29 September 2025
 # updated 02 October 2025 to try with 1000 bg pts
