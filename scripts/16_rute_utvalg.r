@@ -16,7 +16,7 @@ library(purrr)
 
 # Import data -------------------------------------------------------------
 
-# study are based on 250 m rutenett from SSB (provided by Ida)
+# froms cript 02
 rutenett_250 <- st_read("vector/ssb250_studyarea.shp") 
 
 # Boosted Regression Trees selected as highest performing for plants (script 15)
