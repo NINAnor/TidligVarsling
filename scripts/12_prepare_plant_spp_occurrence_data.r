@@ -4,7 +4,6 @@
 # updated 03 November 2025 for additional plant data
 
 # working in TidligVarsling project
-setwd("~/Mounts/R/Prosjekter/15821000_tidlig_oppdagelse_og_varsling_av_fremmede_arter/Jenny/TidligVarsling")
 
 # Load required libraries -------------------------------------------------
 
