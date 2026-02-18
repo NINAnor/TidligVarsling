@@ -65,8 +65,8 @@ rast_stack <- read_RAST(names_vec)
 NinaR::postgreSQLConnect(
   host = "gisdata-db.nina.no",
   dbname = "gisdata",
-  username = "postgjest",
-  password = "gjestpost"
+  username = "username",
+  password = "password"
 )
 
 #---

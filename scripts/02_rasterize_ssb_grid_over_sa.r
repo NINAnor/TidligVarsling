@@ -27,7 +27,7 @@ samp_grid <- st_read("vector/cleaned_grid.geojson") %>%
 samp_grid_cents <- samp_grid %>% 
   st_centroid()
 
-# study are based on 250 m rutenett from SSB (provided by Ida)
+# study area based on 250 m rutenett from SSB (provided by Ida)
 rutenett_250 <- st_read("vector/ssb250_studyarea.shp") 
 
 # Assign sampling grid to 250 m rutenett ----------------------------------
