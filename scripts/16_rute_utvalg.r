@@ -197,6 +197,6 @@ top_grid500_filtered <- candidates[keep,]
 mapview(top_grid500_filtered, zcol = "combined_rank")
 
 # export
-top_grid %>% 
+top_grid500_filtered %>% 
   arrange(combined_rank) %>% 
   st_write("vector/combined_ruteutvalg_spatial_separation.geojson")
