@@ -13,6 +13,7 @@ library(terra)
 library(mapview)
 library(ggplot2)
 library(purrr)
+library(units)
 
 # Import data -------------------------------------------------------------
 
@@ -141,25 +142,61 @@ top_grid_insects <- top_grid_insects %>%
 
 # combine
 top_grid <- top_grid_plants %>%
-  full_join(top_grid_insects, by ="geometry") %>%
-  mutate(SSBID = coalesce(SSBID.x, SSBID.y)) %>% 
-  select(-c(SSBID.x, SSBID.y)) %>% 
-  # set NA to 0
-  mutate(across(2:4, ~ tidyr::replace_na(.x, 0))) %>%
-  # get combined rank
+  full_join(top_grid_insects, by = "geometry") %>%
+  mutate(SSBID = coalesce(SSBID.x, SSBID.y),
+         rank_plants500  = tidyr::replace_na(rank_plants500, 0),
+         rank_insects500 = tidyr::replace_na(rank_insects500, 0)) %>%
+  select(-c(SSBID.x, SSBID.y)) %>%
   mutate(combined_score = 0.75 * rank_plants500 + 0.25 * rank_insects500,
          combined_rank  = rank(-combined_score, ties.method = "average")) %>%
-  st_as_sf(crs = 25833) %>% 
-  select(SSBID, combined_rank, combined_score, rank_plants1:rank_insects500)
+  select(SSBID, combined_rank, combined_score, rank_plants1:rank_plants500,
+         rank_insects1:rank_insects500, geometry) %>% 
+  st_as_sf(crs = 25833) 
+
+mapview(top_grid, zcol = "combined_rank")
 
 top_grid200 <- top_grid %>%
-  filter(combined_rank < 201)
+  slice_min(combined_rank, n = 200)
 
 top_grid500 <- top_grid %>% 
   slice_min(combined_rank, n = 500)
 
-
-mapview(top_grid, zcol="combined_rank")
+mapview(top_grid500, zcol="combined_rank")
 mapview(top_grid200, zcol = "combined_rank")
 
+# export
+top_grid200 %>% st_write("vector/combined_ruteutvalg_top_grid200.geojson")
 top_grid500 %>% st_write("vector/combined_ruteutvalg_top_grid500.geojson")
+
+# Alternative spatial stratification --------------------------------------
+
+# set 500 m separation
+min_dist <- set_units(500, m)
+
+candidates <- top_grid500 %>%
+  arrange(combined_rank)
+
+# logical index
+keep <- rep(TRUE, nrow(candidates))
+
+# loop through and keep highest candidates while maintaining
+# 500 m separation
+for(i in seq_len(nrow(candidates)-1)){
+  
+  if(!keep[i]) next
+  
+  d <- st_distance(candidates[i,], candidates[(i+1):nrow(candidates),])
+  
+  close <- which(d < min_dist)
+  
+  keep[(i+close)] <- FALSE
+}
+
+# filter for selected candidates
+top_grid500_filtered <- candidates[keep,]
+mapview(top_grid500_filtered, zcol = "combined_rank")
+
+# export
+top_grid %>% 
+  arrange(combined_rank) %>% 
+  st_write("vector/combined_ruteutvalg_spatial_separation.geojson")
