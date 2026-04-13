@@ -1,7 +1,6 @@
 # Rute utvalg for TidligVarsling project                    
-# Written by Ida M. Mienna
-# Created 07.11.2025
-# gently modified by Jenny Hansen 18 Feb 2026
+# Ida M. Mienna and Jenny Hansen
+# 24 March 2026
 
 # working in TidligVarsling project
 
@@ -11,14 +10,15 @@ library(dplyr)
 library(sf)
 library(terra)
 library(mapview)
-library(ggplot2)
-library(purrr)
-library(units)
+library(kableExtra)
 
 # Import data -------------------------------------------------------------
 
 # from script 02
 rutenett_250 <- st_read("vector/ssb250_studyarea.shp") 
+
+# prediction area grid w/SSBID 250 m rutenett (script 02)
+ssb_grid <- rast("raster/sa_grid_250m_fixed.tif")
 
 # Boosted Regression Trees selected as highest performing for plants (script 15)
 plant_pred <- rast("raster/plant_prob_brt.tif")
@@ -26,177 +26,91 @@ plant_pred <- rast("raster/plant_prob_brt.tif")
 # RandomForest selected as highest performing for insects (script 15)
 insect_pred <- rast("raster/insect_prob_rf_expanded.tif")
 
-# prediction area grid w/SSBID 250 m rutenett (script 02)
-ssb_grid <- rast("raster/sa_grid_250m_fixed.tif")
+# sampling regions (drawn in QGIS)
+samp_regions <- st_read("vector/sampling_regions.gpkg", 
+                        layer = "sampling_regions")
 
-# combine to stack & assign names
-plant_stack <- c(plant_pred, ssb_grid)
-names(plant_stack) <- c("plant_pred", "ssbid")
-insect_stack <- c(insect_pred, ssb_grid)
-names(insect_stack) <- c("insect_pred", "ssbid")
 
-# Rank by predicted values ------------------------------------------------
+# Create combined probability dataset -------------------------------------
 
-### Plants
-plant_ranked <- plant_stack$plant_pred
-values(plant_ranked) <- rank(values(plant_stack$plant_pred), na.last = "keep", 
-                             ties.method = "average")
+combined_stack <- c(plant_pred, insect_pred, ssb_grid)
+names(combined_stack) <- c("plant_pred", "insect_pred", "SSBID")
 
-# get raster values
-plant_vals <- values(plant_stack$plant_pred)
+combined_df <- as.data.frame(combined_stack, na.rm = FALSE)
 
-# identify top 500 cells (by predicted value)
-plant_top_idx <- order(plant_vals, decreasing = TRUE)[1:500]
+combined_sf <- rutenett_250 %>%
+  select(SSBID, geometry) %>%
+  left_join(combined_df, by = "SSBID") %>%
+  st_as_sf(crs = 25833)
 
-# get XY coordinates for those cells
-plant_xy <- xyFromCell(plant_ranked, plant_top_idx)
 
-# convert to SpatVector points
-top_points_plants <- vect(plant_xy, crs = crs(plant_ranked))  
+# Sample n = 50 each region -----------------------------------------------
 
-# add predicted values
-top_points_plants$rank <- 1:500
-top_points_plants$predicted_value <- plant_vals[plant_top_idx]
-plot(top_points_plants)
+# join top grid with sampling_regions, select 50 highest ranking
+# ruter in each region
+top_grid_regions <- st_join(combined_sf, samp_regions, left = FALSE)
 
-# add SSBID
-top_points_plants$SSBID <- extract(plant_stack$ssbid, top_points_plants)$ssbid
-top_points_plants
-
-# join with SSB rutenett
-ssb_ru_plants <-rutenett_250 %>% 
-  left_join(st_drop_geometry(st_as_sf(top_points_plants)),
-    by = "SSBID")
-mapview(ssb_ru_plants %>% filter(!is.na(rank)), zcol = "predicted_value")
+# select top 50 per region based on insect probability
+rute_utvalg_regions <- top_grid_regions %>%
+  filter(!is.na(insect_pred)) %>%
+  arrange(desc(insect_pred)) %>%
+  group_by(regions) %>%
+  slice_head(n = 50) %>%
+  ungroup()
+  
+mapview(rute_utvalg_regions, zcol = "insect_pred") 
 
 # export
-top_points_plants %>% 
-  writeVector("vector/plant_ruteutvalg_points.geojson")
-ssb_ru_plants %>% filter(!is.na(rank)) %>% 
-  select(SSBID, rank, predicted_value) %>% 
-  st_write("vector/plant_ruteutvalg_rutenett.geojson")
+st_write(rute_utvalg_regions, "vector/utvalgte_ruter_nytt.geojson")
 
 
-### Insects
-insect_ranked <- insect_stack$insect_pred
-values(insect_ranked) <- rank(values(insect_stack$insect_pred), na.last = "keep", 
-                              ties.method = "average")
+# Selection of low-quality grids ------------------------------------------
 
-# get raster values
-insect_vals <- values(insect_stack$insect_pred)
+low_prob_grids <- top_grid_regions %>% 
+  filter(!is.na(insect_pred),
+         insect_pred <= 0.1) %>% 
+  arrange(desc(insect_pred)) %>%
+  group_by(regions) %>%
+  slice_head(n = 50) %>%
+  ungroup()
 
-# identify top 500 cells (by predicted value)
-insect_top_idx <- order(insect_vals, decreasing = TRUE)[1:500]
-
-# get XY coordinates for those cells
-insect_xy <- xyFromCell(insect_ranked, insect_top_idx)
-
-# convert to SpatVector points
-top_points_insects <- vect(insect_xy, crs = crs(insect_ranked))  
-
-# add predicted values
-top_points_insects$rank <- 1:500
-top_points_insects$predicted_value <- insect_vals[insect_top_idx]
-
-# add SSBID
-top_points_insects$SSBID <- extract(insect_stack$ssbid, top_points_insects)$ssbid
-top_points_insects
-
-# join with SSB rutenett
-ssb_ru_insects <-rutenett_250 %>% 
-  left_join(st_drop_geometry(st_as_sf(top_points_insects)),
-            by = "SSBID")
-mapview(ssb_ru_insects %>% filter(!is.na(rank)), zcol = "predicted_value")
+mapview(low_prob_grids, zcol = "insect_pred")
 
 # export
-top_points_insects %>% 
-  writeVector("vector/insect_ruteutvalg_points.geojson")
-ssb_ru_insects %>% filter(!is.na(rank)) %>% 
-  select(SSBID, rank, predicted_value) %>% 
-  st_write("vector/insect_ruteutvalg_rutenett.geojson")
+st_write(low_prob_grids, "vector/utvalgte_ruter_lav_sannsynlighet.geojson")
 
+# Summary tables ----------------------------------------------------------
 
-# Combine ranks and find best combined ------------------------------------
+region_summary <- rute_utvalg_regions %>%
+  st_drop_geometry() %>%
+  group_by(regions) %>%
+  summarise(
+    n_ruter = n(),
+    
+    insect_mean = mean(insect_pred, na.rm = TRUE),
+    insect_median = median(insect_pred, na.rm = TRUE),
+    insect_min = min(insect_pred, na.rm = TRUE),
+    insect_prop_high = mean(insect_pred > 0.7, na.rm = TRUE),
+    
+    plant_mean = mean(plant_pred, na.rm = TRUE),
+    plant_median = median(plant_pred, na.rm = TRUE),
+    plant_min = min(plant_pred, na.rm = TRUE),
+    plant_prop_high = mean(plant_pred > 0.7, na.rm = TRUE)
+  ) %>%
+  arrange(desc(insect_mean))
 
-# drop unnecessary columns & filter out NA vals
-top_grid_plants <- ssb_ru_plants %>% 
-  select(-c(RSIZE, ROW, COL, XCOOR, YCOOR)) %>% 
-  filter(!is.na(rank))
+region_summary %>%
+  kable(digits = 3, caption = "Sampling summary per region") %>%
+  kable_styling(full_width = FALSE)
 
-top_grid_insects <- ssb_ru_insects %>% 
-  select(-c(RSIZE, ROW, COL, XCOOR, YCOOR)) %>% 
-  filter(!is.na(rank))
+low_plant_summary <- rute_utvalg_regions %>%
+  st_drop_geometry() %>%
+  group_by(regions) %>%
+  summarise(
+    n_low_plant = sum(plant_pred <= 0.7, na.rm = TRUE),
+    prop_low_plant = mean(plant_pred <= 0.7, na.rm = TRUE)
+  )
 
-# weigh plants higher than insects
-top_grid_plants <- top_grid_plants %>%
-  mutate(rank_plants500 = 501 - rank) %>%
-  rename(rank_plants1 = rank,
-         predicted_value_plants = predicted_value) %>%
-  as.data.frame()
-
-top_grid_insects <- top_grid_insects %>%
-  mutate(rank_insects500 = 501 - rank) %>%
-  rename(rank_insects1 = rank,
-         predicted_value_insects = predicted_value) %>%
-  as.data.frame()
-
-# combine
-top_grid <- top_grid_plants %>%
-  full_join(top_grid_insects, by = "geometry") %>%
-  mutate(SSBID = coalesce(SSBID.x, SSBID.y),
-         rank_plants500  = tidyr::replace_na(rank_plants500, 0),
-         rank_insects500 = tidyr::replace_na(rank_insects500, 0)) %>%
-  select(-c(SSBID.x, SSBID.y)) %>%
-  mutate(combined_score = 0.75 * rank_plants500 + 0.25 * rank_insects500,
-         combined_rank  = rank(-combined_score, ties.method = "average")) %>%
-  select(SSBID, combined_rank, combined_score, rank_plants1:rank_plants500,
-         rank_insects1:rank_insects500, geometry) %>% 
-  st_as_sf(crs = 25833) 
-
-mapview(top_grid, zcol = "combined_rank")
-
-top_grid200 <- top_grid %>%
-  slice_min(combined_rank, n = 200)
-
-top_grid500 <- top_grid %>% 
-  slice_min(combined_rank, n = 500)
-
-mapview(top_grid500, zcol="combined_rank")
-mapview(top_grid200, zcol = "combined_rank")
-
-# export
-top_grid200 %>% st_write("vector/combined_ruteutvalg_top_grid200.geojson")
-top_grid500 %>% st_write("vector/combined_ruteutvalg_top_grid500.geojson")
-
-# Alternative spatial stratification --------------------------------------
-
-# set 500 m separation
-min_dist <- set_units(500, m)
-
-candidates <- top_grid500 %>%
-  arrange(combined_rank)
-
-# logical index
-keep <- rep(TRUE, nrow(candidates))
-
-# loop through and keep highest candidates while maintaining
-# 500 m separation
-for(i in seq_len(nrow(candidates)-1)){
-  
-  if(!keep[i]) next
-  
-  d <- st_distance(candidates[i,], candidates[(i+1):nrow(candidates),])
-  
-  close <- which(d < min_dist)
-  
-  keep[(i+close)] <- FALSE
-}
-
-# filter for selected candidates
-top_grid500_filtered <- candidates[keep,]
-mapview(top_grid500_filtered, zcol = "combined_rank")
-
-# export
-top_grid500_filtered %>% 
-  arrange(combined_rank) %>% 
-  st_write("vector/combined_ruteutvalg_spatial_separation.geojson")
+low_plant_summary %>% 
+  kable(digits = 3, caption = "Low plant summary per region") %>%
+  kable_styling(full_width = FALSE)
