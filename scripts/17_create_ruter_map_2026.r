@@ -86,7 +86,8 @@ ruter_numbered <- ruter_muni |>
 
 # assign ruter ID
 ruter_2026 <- ruter_numbered |> 
-  tidyr::unite(ruter_id, c("kommunenavn", "id_num"), sep = "_")
+  tidyr::unite(ruter_id, c("kommunenavn", "id_num"), sep = "_") |> 
+  select(-area)
 
 # export 
 st_write(ruter_2026, "vector/ruter_2026.geojson")

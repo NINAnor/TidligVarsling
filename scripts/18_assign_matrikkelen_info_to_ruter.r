@@ -69,7 +69,7 @@ mapview(ruter_eiendom)
 property_export <- ruter_eiendom |> 
   st_drop_geometry() |> 
   distinct(ruter_id, kommunenavn, gnr, bnr) |> 
-  mutate(matrikkel = paste0(gnr, "/", bnr)) |> 
+  mutate(matrikkelen_id = paste0(gnr, "/", bnr)) |> 
   arrange(ruter_id, gnr, bnr) |> 
   remove_rownames()
 
